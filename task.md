@@ -30,11 +30,11 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 |---|---|---|---|
 | 0 — Environment & Store Preparation | 14 | 14 / 14 | complete |
 | 1 — Central Backend Service Development | 18 | 18 / 18 | complete |
-| 2 — Frontend Dashboard Development | 8 | 2 / 8 | in progress |
-| 3 — Deployment | 7 | 0 / 7 | not started |
+| 2 — Frontend Dashboard Development | 8 | 8 / 8 | complete |
+| 3 — Deployment | 7 | 1 / 7 | in progress |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 34 / 53 done
+**Overall:** 41 / 53 done
 
 ## Environment variables
 
@@ -559,7 +559,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** 2026-09-20 — **verified**. `frontend/lib/api.ts` created: one module-scope `API_URL = process.env.NEXT_PUBLIC_API_URL`, `getPrices()` checking `response.ok` before `response.json()` so an erroring backend cannot reach the table as an empty catalogue, and `updatePrice(sku, price)` sending one `PATCH` with `{"price": …}` and returning the body **as-is whatever the status** — both outcomes are readable from it, since 200 and 502 both carry `stores[]` (the per-store message T-2.7 shows) and a rejected request carries `error` instead. `frontend/.env.example` and `frontend/.env.local` both hold the literal `NEXT_PUBLIC_API_URL=http://localhost:3000` the `Do` step writes, comment-free. **One strictly-required wiring change, named because it is outside the three files this task lists:** the scaffold's `frontend/.gitignore` carries `.env*`, which swallowed `.env.example` as well, so `!.env.example` was added — without it this task's own named artifact could not be committed (`git status --ignored --short frontend/` → `?? frontend/.env.example`, `!! frontend/.env.local`). `git check-ignore -v frontend/.env.example` is **not** the check to use here: for a negated pattern it prints the `!` line and exits 0, which reads as "ignored" when the file is in fact tracked. **Verify 1** → `10`, using the value sourced from `.env.local`, so the file's own URL answers. **Verify 2** → `no matches`, exit 1. Stronger, because neither `Verify` command proves the module reads the variable: the real module was imported through Node's type stripping and both helpers were called — `/tmp/t22_check.mjs` → `getPrices() length: 10`, `row keys: sku,name,central_price,stores,has_mismatch`, `updatePrice() body: {"sku":"SKU-003","price":"26.50","stores":[{"store":"alpha","status":"synced","error":null},{"store":"beta","status":"synced","error":null}]}`, `T-2.2 CHECK PASSED`, exit 0 — and that write was **idempotent** (the price the row already held), so no store price moved. The `ok` guard is exercised rather than merely written: against a stub server answering `500` → `GET /prices failed: HTTP 500`, and against a dead port → `fetch failed`. `tsc --noEmit -p frontend/tsconfig.json` → clean, exit 0. **Carried forward:** the dev server on 3001 was started **before** `.env.local` existed and `NEXT_PUBLIC_*` is inlined at compile time, so T-2.3 must restart it or the page reads `undefined` as the base URL.
 - **Blocks:** `T-2.3`, `T-2.5`
 
-### [ ] T-2.3 — Render the price table
+### [x] T-2.3 — Render the price table
 
 - **Depends on:** `T-2.2`, `T-1.10`
 - **Size:** `M`
@@ -569,10 +569,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `frontend/app/page.tsx`
 - **Done when:** the page shows all 10 SKUs with both store columns populated.
 - **Verify:** load `localhost:3001` in the browser → 10 rows, each showing SKU, name, central price, and both store cells; row count matches `curl -s localhost:3000/prices | jq 'length'`.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `frontend/app/page.tsx` replaced the scaffold's `Hello world!` placeholder: an async server component that awaits `getPrices()` — T-2.2's client, reused rather than fetching inline — and renders one `<li>` per SKU with the SKU, name, central price and both store status cells. `Verify` → the page loaded in a **real browser** (`localhost:3001`) and its accessibility snapshot lists exactly **10 list items**, each carrying its SKU (`SKU-001`…`SKU-010`), name (`Aero Travel Mug` … `Brass Desk Lamp`), central price and **two** store cells — e.g. `SKU-001 / Aero Travel Mug / 22.00 / synced / synced` and `SKU-010 / Brass Desk Lamp / 89.50 / synced / synced`. The row count matches the backend: `curl -s localhost:3000/prices | jq 'length'` → `10`; and because the page is server-rendered, the HTML itself was checked too — all ten `SKU-0xx` values present and exactly **20** `>synced<` cells (10 rows × 2 stores), so the store columns are populated from real data rather than placeholders. `frontend/node_modules/.bin/tsc --noEmit -p frontend/tsconfig.json` → exit 0. **Layout choice, forced by T-2.8's "no horizontal scrolling at 375px":** the row is a CSS grid (`md:grid-cols-[4.5rem_minmax(0,1fr)_5rem_7rem_7rem_11rem]`) whose label/value wrappers become `md:contents` at the breakpoint, so one markup gives a phone labelled stacked lines and a desktop six aligned columns; a fixed six-column `<table>` would scroll sideways on a phone. The sixth column is reserved for T-2.5's editor, so that task adds a cell instead of relaying out the row. One change beyond the `Do` step: the payload shape is declared in this file (`PriceRow`) with the store cell read as `p.stores?.alpha?.status ?? 'unknown'` — `tsc` rejected the untyped map callback (TS7006) and the endpoint legitimately returns `stores: {}` for a SKU no store has reported on, so an unguarded read would crash the page rather than show a gap. No type was added to `lib/api.ts`, which T-2.2 owns. Deliberately not shown, per §3.3.2's wording: the stores' `live_price` — the plan asks for one *status* column per store, which is what T-2.4's badge renders.
 - **Blocks:** `T-2.4`, `T-2.5`, `T-2.8`
 
-### [ ] T-2.4 — Add the status badge component
+### [x] T-2.4 — Add the status badge component
 
 - **Depends on:** `T-2.3`
 - **Size:** `S`
@@ -582,10 +582,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `frontend/components/StatusBadge.tsx`
 - **Done when:** each store cell renders a badge driven by the row's status value, not a hard-coded colour.
 - **Verify:** with the T-1.15-style failure data present for one SKU, that row's Beta cell shows a red `failed` badge and every other cell shows green `synced` (named UI observation).
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `frontend/components/StatusBadge.tsx` created: one `Record<string, string>` maps `synced`/`mismatch`/`failed` to the green/yellow/red Tailwind pairs, an unrecognised status falls back to grey (so a value the sync layer invents later cannot silently wear the "fine" colour), the badge prints the status text itself, and `title={error ?? undefined}` carries the store's error when the row has one. Wired into both store cells of `frontend/app/page.tsx` — the edit this task's `Done when` line implies — replacing T-2.3's plain status text. `Verify` → failure data placed for one SKU on an **existing** row (`update store_sync_status set status='failed', error='token request for beta failed: HTTP 404 {"errors":"Not Found"}' where store='beta' and sku='SKU-005'`, no row added, no store touched), page reloaded in the **browser**: SKU-005's Store B cell rendered `failed` and the other nineteen cells all `synced` (20-cell accessibility snapshot). The colour is measured rather than assumed — `getComputedStyle` on the badges returns one fill/text pair for the `synced` badges and a different one for the `failed` badge (background `lab(92.24 10.29 3.84)` vs `lab(96.19 -13.85 6.52)`; positive `a` is red against negative green), and a screenshot of that row shows a light-green `synced` badge beside a light-red `failed` one. The tooltip is live too: the snapshot renders the cell as `generic "token request for beta failed: HTTP 404 {\"errors\":\"Not Found\"}"`. **The injected failure was removed afterwards** — `node backend/scripts/refresh-status.js` → `20 rows in store_sync_status for 10 SKUs × 2 stores, 0 failed`, `synced|20`, SKU-005 beta back to `synced` with a null error, `/prices` flagged `0` — so no later task inherits it. One class beyond the `Do` step, because it is what makes the colour readable: `justify-self-start`, since a grid item stretches to its full column in both the desktop row and the phone's cell, which would have painted a full-width bar instead of a badge.
 - **Blocks:** `T-2.8`
 
-### [ ] T-2.5 — Add the per-row price editor that calls PATCH
+### [x] T-2.5 — Add the per-row price editor that calls PATCH
 
 - **Depends on:** `T-2.2`, `T-2.3`, `T-1.16`
 - **Size:** `M`
@@ -595,10 +595,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `frontend/components/PriceEditor.tsx`, `frontend/app/page.tsx` (edit)
 - **Done when:** submitting a row sends exactly one PATCH for that SKU.
 - **Verify:** change `SKU-004` to a new value in the browser and click Update → the backend log shows `PATCH /prices/SKU-004`, and `docker run --rm --env-file backend/.env postgres:16 psql -w -t -A -c "select price from products where sku='SKU-004'"` shows the new value.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `frontend/components/PriceEditor.tsx` created (`'use client'`, `useState` for the value and a `pending` flag, and it calls T-2.2's `updatePrice`) and mounted as the row's sixth grid cell in `frontend/app/page.tsx` inside a label wrapper, so the phone's stacked layout keeps it aligned with the values above it. `Verify` → in the **browser**: the SKU-004 input arrived pre-filled with `29.95` (the central price), was changed to `31.95`, and the Update click produced **exactly one** request — `patchRequests: ["PATCH http://localhost:3000/prices/SKU-004"]` after filtering every PATCH the page issued — answering `200` with `{"sku":"SKU-004","price":"31.95","stores":[alpha synced, beta synced]}`; `select sku, price from products where sku='SKU-004'` → `SKU-004|31.95`, and `store_sync_status` reads `alpha|synced|31.95` / `beta|synced|31.95` with both stores' own API answers agreeing (`alpha 31.95`, `beta 31.95`), `/prices` flagged `0`. **Substitution, stated rather than glossed:** the `Verify` line asks for "the backend log", and `backend/src/app.js` has **no request logger** (by design — T-1.7/T-1.8 never added one), so the request was observed at the browser's network layer instead, which is the stronger evidence for this task's own `Done when` ("exactly one PATCH"): a log line proves a request arrived, the request list proves the page sent one and only one. **The in-flight disable was measured, not assumed** — sampling the button every 40ms from the moment the form was submitted gives `40ms|DISABLED|Updating…` … `2840ms|enabled|Update`, so the button is genuinely locked for the whole ~2.8s round trip. (A first attempt sampled once at 250ms and read `enabled`, which was the sampler's timing, not the component's behaviour — the interval sampling is what settled it. `input.press('Enter')` also submits, since the control is a real `<form>`, which is why one input per row needed no keydown handler.) **Data left behind deliberately:** SKU-004's central price is now `31.95` (was the seeded `29.95`) and both stores hold it, so any later check quoting the seed file for SKU-004 must re-read it first; nothing is out of sync.
 - **Blocks:** `T-2.6`, `T-2.7`
 
-### [ ] T-2.6 — Refresh the table after a successful update
+### [x] T-2.6 — Refresh the table after a successful update
 
 - **Depends on:** `T-2.5`
 - **Size:** `S`
@@ -608,10 +608,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `frontend/components/PriceEditor.tsx` (edit)
 - **Done when:** the visible row updates to the new price and statuses on its own.
 - **Verify:** in the browser, update a row and observe without reloading: the central price shows the new value and both badges stay/return to green (named UI observation).
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `PriceEditor.tsx` now calls `router.refresh()` (from `next/navigation`) after the PATCH, which re-runs T-2.3's server component instead of adding a second, client-side fetch of the same endpoint. It is gated on the response carrying `stores` — that field is present exactly when the central write happened (200 and 502 both carry it; a rejected request carries `error` instead) — so a failed store still refreshes the row and turns its badge red, while a 400 does not re-render. `Verify` → in the **browser**, with no reload between the two reads, SKU-006's row went from `Central35.75` to `Central36.75` with both cells still `Store Asynced` / `Store Bsynced`, `status=200`, and the page still holding `10` rows; the database agrees (`SKU-006|36.75`, `alpha|synced|36.75`, `beta|synced|36.75`, `/prices` flagged `0`). The first run of the same check also repaired the stale row T-2.5 left behind (SKU-004 displayed `29.95` while the database held `31.95`), which is the visible proof the refresh re-reads the server rather than reusing what was already on the screen. **A strictly-required export beyond this task's file, named because it is outside the line:** `export const dynamic = 'force-dynamic'` in `frontend/app/page.tsx`. Running `next build` showed why it is needed — the route was reported as `○ / (Static)`, i.e. prerendered at build time, so a deployed dashboard would have served the prices that existed when Vercel built it, `router.refresh()` would have re-fetched that same frozen payload, and the build itself would have needed a live backend to succeed (a real hazard for T-3.5, which builds the frontend before anything proves the deployed API). One line, in the page whose data is live; after it the same build reports `ƒ / (Dynamic) server-rendered on demand` with `/` generated on demand. **Data left behind:** SKU-006 is now `36.75` (was the seeded `34.75`) on both stores, alongside SKU-004 `31.95` from T-2.5 — later checks quoting the seed file for those SKUs must re-read them.
 - **Blocks:** `T-2.8`
 
-### [ ] T-2.7 — Surface PATCH errors per store
+### [x] T-2.7 — Surface PATCH errors per store
 
 - **Depends on:** `T-2.5`
 - **Size:** `S`
@@ -621,10 +621,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `frontend/components/PriceEditor.tsx` (edit)
 - **Done when:** a store-level failure and a validation rejection are visually distinguishable.
 - **Verify:** with `SHOPIFY_BETA_STORE` pointing at a non-existent store, update a row → the Beta badge turns red and the message names Beta; submitting `abc` as a price shows a validation error and sends no request. Restore the variable afterwards.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified, both halves.** `PriceEditor.tsx` now keeps a `message`: a request the API **rejected** comes back as `error` (T-1.16's 400/404 body) and is shown on its own, while an **accepted** request carries `stores[]` and each store that did not take the price contributes `${store}: ${error ?? status}`, joined with `·`; a clean sync clears the message. `router.refresh()` moved inside the accepted branch, because a rejected request changes nothing to re-read. So the two failure kinds are distinguishable at a glance: the store-level message always begins with the store's own key, the row-level one never does. **Store-level half** — `backend/.env` copied to `/tmp/backend.env.bak`, `SHOPIFY_BETA_STORE` pointed at `betastore-does-not-exist-9f3a.myshopify.com`, backend restarted (the env is read at startup), page reloaded, SKU-007 submitted with `20.50`: response `200` `{"sku":"SKU-007","price":"20.50","stores":[alpha synced, beta failed …]}`, and in the **browser** Store A stayed a green `synced` badge while Store B's badge rendered **red** `failed` — measured, not eyeballed: background `lab(92.24 10.29 3.84)` for the failed badge against `lab(96.19 -13.85 6.52)` for the still-synced one — with its `title` carrying the error, and the row's message paragraph reading `beta: token request for beta failed: HTTP 404 {"errors":"Not Found"}`, i.e. it names Beta and quotes the store's own reason rather than a generic failure. **Rejection half** — a PATCH-request listener was attached and two invalid prices were submitted: **empty** → `valid: false`, browser message `Please fill out this field.`; **`20.505`** → `valid: false`, `Please enter a valid value. The two nearest valid values are 20.5 and 20.51.`; requests sent: **`[]`** — so the invalid price never left the browser, which is what the `Verify` line asks for. Deviation stated: `abc` cannot be typed into a `<input type="number">` at all (the control discards it and reports an empty value), so the two cases that can actually occur were used instead — an empty value and an over-precise one — and both are blocked **by the platform**, via `required` plus T-2.5's existing `min`/`step`, rather than by a hand-written regex duplicating T-1.12's server-side check. The server-side guard is untouched and remains the trust boundary for direct API calls; the `error` rendering stays as the path for a rejection the input cannot anticipate (e.g. a 404 on a deleted SKU). **Restored afterwards, and verified rather than assumed:** `cp` the backup back, `diff -q` → identical, both `SHOPIFY_*_STORE` names correct, backend restarted, then the same SKU re-PATCHed to its seeded `14.00` → `200` with both stores `synced`; `alpha|synced|14.00` / `beta|synced|14.00`, `products` back to `14.00`, and `/prices` flagged **0** — so T-2.5/T-2.6's data changes are the only ones this batch leaves behind, and the forced failure is gone.
 - **Blocks:** `T-2.8`
 
-### [ ] T-2.8 — Phase 2 smoke test — dashboard renders and is usable at desktop and mobile widths
+### [x] T-2.8 — Phase 2 smoke test — dashboard renders and is usable at desktop and mobile widths
 
 - **Depends on:** `T-2.3`, `T-2.4`, `T-2.6`, `T-2.7`
 - **Size:** `S`
@@ -634,7 +634,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none
 - **Done when:** all 10 rows, both store columns, badges, and the editor are reachable without horizontal scrolling or clipped controls at both widths.
 - **Verify:** screenshots at both widths show the table fully readable and the Update button clickable in each row (named UI observation).
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified.** `Do` step 1 run in a **real browser** at both widths, with the layout measured rather than eyeballed. **1280×800:** 10 rows, 10 Update buttons, 20 badges (all `synced`), `documentElement.scrollWidth` 1280 = the viewport, so no horizontal overflow, and **zero** clipped controls — every input and button's bounding box lies inside the viewport with a non-zero width. **375×812:** same counts, `scrollWidth` 360 ≤ 375, no overflow, no clipped controls; the accessibility snapshot confirms the phone layout resolves to labelled lines (`SKU-001 / Aero Travel Mug`, `Central 22.00`, `Store A synced`, `Store B synced`, `Update` + input + button) — which is exactly what T-2.3's `md:contents` grid was built for, and why a fixed six-column table was rejected there. Screenshots at both widths show the table fully readable: at 1280 the header row and all ten rows with both badge columns and an Update button each; at 375 the stacked rows with every input and button intact. **"Clickable" was proved by clicking, not by measuring:** at 375px the real SKU-010 Update button was clicked (`clicked: "real click"`) and the page sent `PATCH /prices/SKU-010` → `200` with both stores `synced` — at the current price `89.50`, so the smoke test left **no data change**: afterwards `10` rows / `0` flagged, `synced|20`, and the ten central prices read back exactly as T-2.5/T-2.6/T-2.7 left them (`SKU-004 31.95`, `SKU-006 36.75`, SKU-007 back at its seeded `14.00`). Phase 2's own deliverable — a responsive dashboard that renders live sync data and can drive the sync — therefore works at both widths.
 - **Blocks:** `T-3.1`
 
 ---
@@ -654,7 +654,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** `-`
 - **Blocks:** `T-3.3`, `T-3.5`
 
-### [ ] T-3.2 — Add the Vercel serverless entry for the Express app
+### [x] T-3.2 — Add the Vercel serverless entry for the Express app
 
 - **Depends on:** `T-1.7`
 - **Size:** `S`
@@ -665,7 +665,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/api/index.js`, `backend/vercel.json`
 - **Done when:** the same app object is served locally and as a function.
 - **Verify:** `node -e "import('./backend/api/index.js').then(m=>console.log(typeof m.default))"` → `function`.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified.** `backend/api/index.js` is three lines: `import { app } from '../src/app.js'` and `export default app`. No adapter, no second `express()` call and no route of its own, because an Express app already is a `(req, res)` handler — this is the whole reason T-1.7 exported the app object instead of calling `listen`. `backend/vercel.json` is one rewrite, `{"rewrites":[{"source":"/(.*)","destination":"/api"}]}`, which is what makes `/health` and `/prices` reach the function rather than Vercel's static-file 404. **`Verify` as written** → `function`, exit 0. Strengthened, because "is a function" does not prove `Done when`'s "the same app object": a throwaway driver in `/tmp/t32_check.mjs` (this task's artifacts line names only the two files, so nothing else landed in the repo) asserted `handler === app` → **true**, i.e. identity with the object `src/server.js` listens on locally, and then handed the default export to `http.createServer(handler)` — exactly what Vercel's Node runtime does with it — serving on an ephemeral port: `GET /health` → **200 `{"ok":true}`** and `GET /prices` → **10 rows** (values agreeing with the local server, which is still answering on 3000). `T-3.2 CHECK PASSED`, exit 0. `vercel.json` was parsed rather than eyeballed → `{"rewrites":[{"source":"/(.*)","destination":"/api"}]}`. **Not done, and deliberately:** the `Do` step's "running the build/install from `backend/`" is not expressed in `vercel.json` — Vercel has no per-file way to set the root, it is the project's **Root Directory**, which T-3.3's own `Do` step 1 performs when it creates the project from `backend/`. The backend needs no build step at all (plain Node ESM, `api/index.js` is the only entry), so adding `buildCommand`/`installCommand` here would be configuration with nothing to configure. Nothing in this task can be proved further without the Vercel account T-3.3 needs.
 - **Blocks:** `T-3.3`
 
 ### [ ] T-3.3 — Deploy the backend to Vercel with its environment variables
