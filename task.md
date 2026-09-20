@@ -30,11 +30,11 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 |---|---|---|---|
 | 0 — Environment & Store Preparation | 14 | 14 / 14 | complete |
 | 1 — Central Backend Service Development | 18 | 18 / 18 | complete |
-| 2 — Frontend Dashboard Development | 8 | 8 / 8 | complete |
+| 2 — Frontend Dashboard Development | 9 | 9 / 9 | complete |
 | 3 — Deployment | 7 | 2 / 7 | in progress |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 42 / 53 done
+**Overall:** 43 / 54 done
 
 ## Environment variables
 
@@ -47,7 +47,7 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | `SHOPIFY_CLIENT_ID` | backend | T-0.6 Dev Dashboard app client id — one app, both stores | local `backend/.env`, Vercel (backend) |
 | `SHOPIFY_CLIENT_SECRET` | backend | T-0.6 Dev Dashboard app client secret (secret) | local `backend/.env`, Vercel (backend) |
 | `SHOPIFY_API_VERSION` | backend | pinned Admin API version string | local `backend/.env`, Vercel (backend) |
-| `ALLOWED_ORIGIN` | backend | deployed frontend URL from T-3.5 | local `backend/.env`, Vercel (backend) |
+| `ALLOWED_ORIGIN` | backend | deployed dashboard URL from T-3.5 (one origin under T-3.3's single project) | local `backend/.env`, Vercel (project) |
 | `PORT` | backend | local only | `backend/.env` |
 | `PGHOST` | database access (psql/`pg`) | Supabase → Project Settings → Database → Connection pooling, host `aws-<n>-<region>.pooler.supabase.com` | local `backend/.env` |
 | `PGPORT` | database access (psql/`pg`) | pooler **session** mode → `5432` | local `backend/.env` |
@@ -55,7 +55,8 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | `PGUSER` | database access (psql/`pg`) | `postgres.<project-ref>` — the pooler's username form | local `backend/.env` |
 | `PGPASSWORD` | database access (psql/`pg`) | Supabase → Project Settings → Database → password (secret) | local `backend/.env` |
 | `PGSSLMODE` | database access (psql/`pg`) | `require` — the pooler refuses unencrypted connections | local `backend/.env` |
-| `NEXT_PUBLIC_API_URL` | frontend | T-3.3 deployed backend URL | local `frontend/.env.local`, Vercel (frontend) |
+| `NEXT_PUBLIC_API_URL` | frontend (browser) | T-3.3 project URL — **optional when the dashboard and the API share one deployment**, where T-2.9 makes the browser use relative paths; required for local dev and the two-project fallback | local `frontend/.env.local`, Vercel only in the split shape |
+| `API_URL` | frontend (server-side fetches) | **not set by hand** — injected by Vercel from the frontend → backend *service binding*; `http://backend:3000` in `docker-compose.yml` | Vercel (binding), `docker-compose.yml` |
 
 The `PG*` names are the standard libpq contract: `psql`, `pg_dump` and node-postgres read them
 from the environment with no glue code, so the database connection needs one secret, not four
@@ -81,7 +82,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 4. **`mismatch` vs `failed`.** §3.1.4 names only `synced` / `mismatch`; §3.2.4 also says `mismatch`/`failed`. Assumption: both values exist — `failed` = Shopify call errored, `mismatch` = store price differs from central. Confirm if only two states are wanted.
 5. **The 10 SKUs are unspecified** (no identifiers, names, or prices). Assumption: defined in `backend/seed/products.json` (T-0.3) and seeded identically into both stores, using `SKU-001`…`SKU-010` in all verification steps.
 6. **No authentication is specified for `PATCH /prices/:sku`.** Assumption: none is added (per `rules.md`, no unrequested features). Flagged as a risk: the route is publicly writable once deployed.
-7. **Repo layout is unspecified.** §3.4.1/§3.4.2 allow "separate project or integrated frontend". Assumption: one repo, `backend/` and `frontend/` as sibling Vercel projects.
+7. **Repo layout is unspecified.** §3.4.1/§3.4.2 allow "separate project or integrated frontend". Assumption: one repo, `backend/` and `frontend/` as sibling Vercel projects. **Revised 2026-09-20 (owner decision):** one repository, **one Vercel deployment**, both apps inside it — using Vercel **Services** (`vercel.com/docs/services`, last updated 2026-08-10: *"deploy multiple backends and frontends within a single Vercel project … replacing the need to split monorepos into separate Vercel projects"*). The sibling-projects reading survives only as the fallback in T-3.3.
 8. **Currency.** Assumption: single currency; all prices are 2-decimal `numeric(10,2)` and each store's defaults accept them.
 9. **Express on Vercel has no default entry point.** Assumption: a thin serverless adapter is added in T-3.2 rather than switching frameworks.
 10. **Data layer.** §3.2.2 says "Supabase client". **Decided 2026-09-20:** node-postgres (`pg`) over the Supabase pooler, not `@supabase/supabase-js` over PostgREST — one credential contract (`PG*`) shared by `psql`, the seed artifacts and the app; no local-only branch; the local engine is the same engine as production. Consequence carried into T-1.1, T-1.2, T-1.3, T-1.9, T-3.3 and the `/rest/v1/` `Verify` lines.
@@ -621,7 +622,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `frontend/components/PriceEditor.tsx` (edit)
 - **Done when:** a store-level failure and a validation rejection are visually distinguishable.
 - **Verify:** with `SHOPIFY_BETA_STORE` pointing at a non-existent store, update a row → the Beta badge turns red and the message names Beta; submitting `abc` as a price shows a validation error and sends no request. Restore the variable afterwards.
-- **Evidence:** 2026-09-20 — **verified, both halves.** `PriceEditor.tsx` now keeps a `message`: a request the API **rejected** comes back as `error` (T-1.16's 400/404 body) and is shown on its own, while an **accepted** request carries `stores[]` and each store that did not take the price contributes `${store}: ${error ?? status}`, joined with `·`; a clean sync clears the message. `router.refresh()` moved inside the accepted branch, because a rejected request changes nothing to re-read. So the two failure kinds are distinguishable at a glance: the store-level message always begins with the store's own key, the row-level one never does. **Store-level half** — `backend/.env` copied to `/tmp/backend.env.bak`, `SHOPIFY_BETA_STORE` pointed at `betastore-does-not-exist-9f3a.myshopify.com`, backend restarted (the env is read at startup), page reloaded, SKU-007 submitted with `20.50`: response `200` `{"sku":"SKU-007","price":"20.50","stores":[alpha synced, beta failed …]}`, and in the **browser** Store A stayed a green `synced` badge while Store B's badge rendered **red** `failed` — measured, not eyeballed: background `lab(92.24 10.29 3.84)` for the failed badge against `lab(96.19 -13.85 6.52)` for the still-synced one — with its `title` carrying the error, and the row's message paragraph reading `beta: token request for beta failed: HTTP 404 {"errors":"Not Found"}`, i.e. it names Beta and quotes the store's own reason rather than a generic failure. **Rejection half** — a PATCH-request listener was attached and two invalid prices were submitted: **empty** → `valid: false`, browser message `Please fill out this field.`; **`20.505`** → `valid: false`, `Please enter a valid value. The two nearest valid values are 20.5 and 20.51.`; requests sent: **`[]`** — so the invalid price never left the browser, which is what the `Verify` line asks for. Deviation stated: `abc` cannot be typed into a `<input type="number">` at all (the control discards it and reports an empty value), so the two cases that can actually occur were used instead — an empty value and an over-precise one — and both are blocked **by the platform**, via `required` plus T-2.5's existing `min`/`step`, rather than by a hand-written regex duplicating T-1.12's server-side check. The server-side guard is untouched and remains the trust boundary for direct API calls; the `error` rendering stays as the path for a rejection the input cannot anticipate (e.g. a 404 on a deleted SKU). **Restored afterwards, and verified rather than assumed:** `cp` the backup back, `diff -q` → identical, both `SHOPIFY_*_STORE` names correct, backend restarted, then the same SKU re-PATCHed to its seeded `14.00` → `200` with both stores `synced`; `alpha|synced|14.00` / `beta|synced|14.00`, `products` back to `14.00`, and `/prices` flagged **0** — so T-2.5/T-2.6's data changes are the only ones this batch leaves behind, and the forced failure is gone.
+- **Evidence:** 2026-09-20 — **verified, both halves.** `PriceEditor.tsx` now keeps a `message`: a request the API **rejected** comes back as `error` (T-1.16's 400/404 body) and is shown on its own, while an **accepted** request carries `stores[]` and each store that did not take the price contributes `${store}: ${error ?? status}`, joined with `·`; a clean sync clears the message. `router.refresh()` moved inside the accepted branch, because a rejected request changes nothing to re-read. So the two failure kinds are distinguishable at a glance: the store-level message always begins with the store's own key, the row-level one never does. **Store-level half** — `backend/.env` copied to `/tmp/backend.env.bak`, `SHOPIFY_BETA_STORE` pointed at `betastore-does-not-exist-9f3a.myshopify.com`, backend restarted (the env is read at startup), page reloaded, SKU-007 submitted with `20.50`: response `200` `{"sku":"SKU-007","price":"20.50","stores":[alpha synced, beta failed …]}`, and in the **browser** Store A stayed a green `synced` badge while Store B's badge rendered **red** `failed` — measured, not eyeballed: background `lab(92.24 10.29 3.84)` for the failed badge against `lab(96.19 -13.85 6.52)` for the still-synced one — with its `title` carrying the error, and the row's message paragraph reading `beta: token request for beta failed: HTTP 404 {"errors":"Not Found"}`, i.e. it names Beta and quotes the store's own reason rather than a generic failure. **Rejection half** — a PATCH-request listener was attached and two invalid prices were submitted: **empty** → `valid: false`, browser message `Please fill out this field.`; **`20.505`** → `valid: false`, `Please enter a valid value. The two nearest valid values are 20.5 and 20.51.`; requests sent: **`[]`** — so the invalid price never left the browser, which is what the `Verify` line asks for. Deviation stated: `abc` cannot be typed into a `<input type="number">` at all (the control discards it and reports an empty value), so the two cases that can actually occur were used instead — an empty value and an over-precise one — and both are blocked **by the platform**, via `required` plus T-2.5's existing `min`/`step`, rather than by a hand-written regex duplicating T-1.12's server-side check. The server-side guard is untouched and remains the trust boundary for direct API calls; the `error` rendering stays as the path for a rejection the input cannot anticipate (e.g. a 404 on a deleted SKU). **Restored afterwards, and verified rather than assumed:** `cp` the backup back, `diff -q` → identical, both `SHOPIFY_*_STORE` names correct, backend restarted, then the same SKU re-PATCHed to its seeded `14.00` → `200` with both stores `synced`; `alpha|synced|14.00` / `beta|synced|14.00`, `products` back to `14.00`, and `/prices` flagged **0** — so T-2.5/T-2.6's data changes are the only ones this batch leaves behind, and the forced failure is gone. **Amended 2026-09-20, after a later `tsc`/`next build`:** the `failed.map((s) => …)` added here had an **implicitly `any` parameter** (TS7006) — `updatePrice` returns the body as `any`, so the filter's annotation did not type the array that `map` walked. Its own `Verify` passed because the browser renders happily from untyped code and `next dev` does not typecheck; **`next build` — which is exactly what Vercel runs — would have failed**, so this was a deployment blocker, not cosmetics. Fixed by declaring the response shape once (`const stores: { store: string; status: string; error?: string | null }[] = result.stores ?? []`), which also documents T-1.16's contract in the component that consumes it; `tsc --noEmit` → exit 0 and `next build` → success. Lesson recorded for the remaining frontend work: a browser `Verify` is not a build check.
 - **Blocks:** `T-2.8`
 
 ### [x] T-2.8 — Phase 2 smoke test — dashboard renders and is usable at desktop and mobile widths
@@ -636,6 +637,19 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Verify:** screenshots at both widths show the table fully readable and the Update button clickable in each row (named UI observation).
 - **Evidence:** 2026-09-20 — **verified.** `Do` step 1 run in a **real browser** at both widths, with the layout measured rather than eyeballed. **1280×800:** 10 rows, 10 Update buttons, 20 badges (all `synced`), `documentElement.scrollWidth` 1280 = the viewport, so no horizontal overflow, and **zero** clipped controls — every input and button's bounding box lies inside the viewport with a non-zero width. **375×812:** same counts, `scrollWidth` 360 ≤ 375, no overflow, no clipped controls; the accessibility snapshot confirms the phone layout resolves to labelled lines (`SKU-001 / Aero Travel Mug`, `Central 22.00`, `Store A synced`, `Store B synced`, `Update` + input + button) — which is exactly what T-2.3's `md:contents` grid was built for, and why a fixed six-column table was rejected there. Screenshots at both widths show the table fully readable: at 1280 the header row and all ten rows with both badge columns and an Update button each; at 375 the stacked rows with every input and button intact. **"Clickable" was proved by clicking, not by measuring:** at 375px the real SKU-010 Update button was clicked (`clicked: "real click"`) and the page sent `PATCH /prices/SKU-010` → `200` with both stores `synced` — at the current price `89.50`, so the smoke test left **no data change**: afterwards `10` rows / `0` flagged, `synced|20`, and the ten central prices read back exactly as T-2.5/T-2.6/T-2.7 left them (`SKU-004 31.95`, `SKU-006 36.75`, SKU-007 back at its seeded `14.00`). Phase 2's own deliverable — a responsive dashboard that renders live sync data and can drive the sync — therefore works at both widths.
 - **Blocks:** `T-3.1`
+
+### [x] T-2.9 — Make the API base URL work when the dashboard and the API share one deployment
+
+- **Depends on:** `T-2.2`
+- **Size:** `S`
+- **Why:** one deployment means one origin, so the browser must call **relative** paths while a server component must use the API's **internal** address. `frontend/lib/api.ts` read only `NEXT_PUBLIC_API_URL`, which cannot express both — and that is not hypothetical: `docker-compose.yml` already sets `API_URL: http://backend:3000` with the comment that server components need it, and nothing consumed it, so the containerised dashboard could not render at all (`localhost` inside the frontend container is the container, not the backend). Discovered while planning T-3.3.
+- **Do:**
+  1. In `frontend/lib/api.ts`, pick the base per environment: server-side prefers `API_URL`, the browser uses `NEXT_PUBLIC_API_URL`, and each falls back to the other so a single-variable setup (local dev, two Vercel projects) keeps working unchanged; a relative base is the default when neither is set.
+- **Files / artifacts:** `frontend/lib/api.ts` (edit)
+- **Done when:** the module resolves the right base for a same-origin deployment, for the split deployment and for local dev, with no caller changing.
+- **Verify:** with `API_URL` pointing at one stub and `NEXT_PUBLIC_API_URL` at another, `getPrices()` must read the first; with `API_URL` unset it must read the second; `tsc --noEmit` and `next build` stay clean.
+- **Evidence:** 2026-09-20 — **verified**. `frontend/lib/api.ts` now derives two constants: `PUBLIC_API_URL` (`NEXT_PUBLIC_API_URL ?? ''`, so an unset value yields relative paths) and `API_URL` (`process.env.API_URL` server-side, falling back to the public one, trailing slashes trimmed because a binding hands over a base URL). `Verify` → a throwaway driver (`/tmp/t29_check.mjs`, outside the repo) ran two stubs and asserted which one was read: **`API_URL` set with a trailing slash + `NEXT_PUBLIC_API_URL` pointing at a second stub → `getPrices()` returned `via-API_URL`** (so the server-side branch wins and the join is correct); **`API_URL` deleted → the same call returned `via-NEXT_PUBLIC_API_URL`** (so nothing that works today breaks) → `T-2.9 CHECK PASSED`, exit 0. Both stubs assert the request path is exactly `/prices`, so the base is joined once and not doubled. `frontend/node_modules/.bin/tsc --noEmit -p frontend/tsconfig.json` → exit 0, `npm --prefix frontend run build` → succeeds with `/` still `ƒ (Dynamic)`, and the running dev server still renders **10 SKUs / 20 status cells** from the host setup (`NEXT_PUBLIC_API_URL` unchanged in `frontend/.env.local`), i.e. no existing path regressed. **Deliberately not done:** no `API_URL` fallback was added to `frontend/.env.example` (the browser must never see it — it is not a `NEXT_PUBLIC_*` name), and the compose stack's server-side bug is fixed by this change but not re-verified by running the containers, which would need the host dev servers stopped; that stays a known gap, recorded rather than claimed.
+- **Blocks:** `T-3.3`, `T-3.5`
 
 ---
 
@@ -666,57 +680,62 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Done when:** the same app object is served locally and as a function.
 - **Verify:** `node -e "import('./backend/api/index.js').then(m=>console.log(typeof m.default))"` → `function`.
 - **Evidence:** 2026-09-20 — **verified.** `backend/api/index.js` is three lines: `import { app } from '../src/app.js'` and `export default app`. No adapter, no second `express()` call and no route of its own, because an Express app already is a `(req, res)` handler — this is the whole reason T-1.7 exported the app object instead of calling `listen`. `backend/vercel.json` is one rewrite, `{"rewrites":[{"source":"/(.*)","destination":"/api"}]}`, which is what makes `/health` and `/prices` reach the function rather than Vercel's static-file 404. **`Verify` as written** → `function`, exit 0. Strengthened, because "is a function" does not prove `Done when`'s "the same app object": a throwaway driver in `/tmp/t32_check.mjs` (this task's artifacts line names only the two files, so nothing else landed in the repo) asserted `handler === app` → **true**, i.e. identity with the object `src/server.js` listens on locally, and then handed the default export to `http.createServer(handler)` — exactly what Vercel's Node runtime does with it — serving on an ephemeral port: `GET /health` → **200 `{"ok":true}`** and `GET /prices` → **10 rows** (values agreeing with the local server, which is still answering on 3000). `T-3.2 CHECK PASSED`, exit 0. `vercel.json` was parsed rather than eyeballed → `{"rewrites":[{"source":"/(.*)","destination":"/api"}]}`. **Not done, and deliberately:** the `Do` step's "running the build/install from `backend/`" is not expressed in `vercel.json` — Vercel has no per-file way to set the root, it is the project's **Root Directory**, which T-3.3's own `Do` step 1 performs when it creates the project from `backend/`. The backend needs no build step at all (plain Node ESM, `api/index.js` is the only entry), so adding `buildCommand`/`installCommand` here would be configuration with nothing to configure. Nothing in this task can be proved further without the Vercel account T-3.3 needs.
+- **Revised 2026-09-20 (one-deployment decision):** both files are for the **two-project fallback** only. Under T-3.3's Services project the Express app is detected inside `backend/` from `src/server.js` (it calls `app.listen()`, one of the two patterns Vercel's zero-config Express detection accepts), which makes `backend/api/index.js` a redundant second entry, and `backend/vercel.json` **actively harmful**: a service's own rewrites run on every request that reaches it, so its `/(.*)` → `/api` rule would rewrite `/health` away before the app saw it. Delete `backend/vercel.json` when deploying via Services; keep `backend/api/index.js` as the fallback's entry.
 - **Blocks:** `T-3.3`
 
-### [ ] T-3.3 — Deploy the backend to Vercel with its environment variables
+### [ ] T-3.3 — Deploy both apps as one Vercel project, with its environment variables
 
-- **Depends on:** `T-3.1`, `T-3.2`, `T-0.8`
+- **Depends on:** `T-3.1`, `T-3.2`, `T-0.8`, `T-2.9`
 - **Size:** `M`
-- **Why:** §3.4.1 — "configure all secure environment variables (Supabase keys and Shopify store credentials/tokens)".
+- **Why:** §3.4.1 — "configure all secure environment variables (Supabase keys and Shopify store credentials/tokens)". **Revised 2026-09-20 (owner decision):** the requirement is **one Vercel deployment containing both apps**, so the project is created from the **repository root** and declares both as **Services** — a supported Vercel feature (`vercel.com/docs/services`: *"a Next.js frontend and a FastAPI backend in the same repository deploy together with shared routing, environment variables, and a unique domain"*). The original reading (a project created from `backend/`) is now the fallback, kept below.
 - **Do:**
-  1. Create the Vercel project from `backend/` and add every server-side variable from the Env vars table in the project settings (never in the repo) — on the decided data layer (2026-09-20) that is the six `PG*` names, the four `SHOPIFY_*` names and `ALLOWED_ORIGIN`. `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` are not needed: the app does not read them.
-- **Files / artifacts:** Vercel project config (dashboard)
-- **Done when:** the deployed backend answers and can reach both Shopify stores and Supabase.
-- **Verify:** `curl -s -o /dev/null -w '%{http_code}' https://<backend>.vercel.app/health` → `200`.
+  1. If the dashboard asks, enable **Services** for the account — the docs mark it *Services (Beta)*, which is the one thing that cannot be checked from this repo.
+  2. Create the Vercel project from the **repository root**, so the root `vercel.json` is read and both services are built (`frontend/` and `backend/` each keep their own root and install).
+  3. Add every server-side variable from the Env vars table to the **project** (shared by both services; never in the repo) — the six `PG*` names, the four `SHOPIFY_*` names and `ALLOWED_ORIGIN`. Do **not** set `NEXT_PUBLIC_API_URL` (unset makes the browser use relative paths on the one origin, per T-2.9) and do **not** set `API_URL` (the binding injects it).
+  4. Deploy, then settle the two things the repo cannot decide: delete `backend/vercel.json` if `/health` 404s (see T-3.2's revision), and confirm whether the injected `API_URL` carries a trailing slash.
+- **Files / artifacts:** root `vercel.json` (created 2026-09-20 — `services`, the frontend→backend binding, and the rewrites that expose `/health`, `/prices` and `/prices/*` on the one domain), Vercel project config (dashboard)
+- **Done when:** the deployed project answers and can reach both Shopify stores and Supabase.
+- **Verify:** `curl -s -o /dev/null -w '%{http_code}' https://<project>.vercel.app/health` → `200`.
+- **Fallback (only if Services cannot be enabled):** create the project from `backend/` and a second from `frontend/`, set `NEXT_PUBLIC_API_URL` to the backend URL, and keep `backend/vercel.json` — exactly what T-3.2 built, with T-3.4/T-3.5 read as two hosts again.
 - **Evidence:** `-`
 - **Blocks:** `T-3.4`, `T-3.5`
 
-### [ ] T-3.4 — Verify the deployed backend routes
+### [ ] T-3.4 — Verify the deployed routes
 
 - **Depends on:** `T-3.3`
 - **Size:** `S`
 - **Why:** the local pass does not prove the env vars landed in the deployment.
 - **Do:**
-  1. Call both routes against the deployed URL.
+  1. Call both routes against the deployed project's one domain.
 - **Files / artifacts:** none
 - **Done when:** the deployed read route returns real database data.
-- **Verify:** `curl -s https://<backend>.vercel.app/prices | jq 'length'` → `10`; `curl -s -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"price":"abc"}' https://<backend>.vercel.app/prices/SKU-001` → `400`.
+- **Verify:** `curl -s https://<project>.vercel.app/prices | jq 'length'` → `10`; `curl -s -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"price":"abc"}' https://<project>.vercel.app/prices/SKU-001` → `400`. **Restated 2026-09-20** from `https://<backend>.vercel.app/...`: the paths are unchanged — the top-level rewrites send `/prices` to the Express service and *"the service receives the original request path"* — only the host collapses from two to one.
 - **Evidence:** `-`
 - **Blocks:** `T-3.5`, `T-4.1`
 
-### [ ] T-3.5 — Deploy the frontend to Vercel pointed at the deployed backend
+### [ ] T-3.5 — Confirm the dashboard is served by that same deployment
 
 - **Depends on:** `T-3.3`, `T-3.1`
-- **Size:** `M`
-- **Why:** §3.4.2 — the dashboard must be reachable without a local server.
+- **Size:** `S`
+- **Why:** §3.4.2 — the dashboard must be reachable without a local server. **Revised 2026-09-20:** under T-3.3's Services project there is no second deployment to create, so this task is now the check that the *frontend* service is what serves `/`, and that the browser reaches the API on its own origin.
 - **Do:**
-  1. Create the frontend Vercel project from `frontend/`, set `NEXT_PUBLIC_API_URL` to the T-3.3 URL, and deploy.
-- **Files / artifacts:** Vercel project config (dashboard)
-- **Done when:** the deployed dashboard loads live data.
-- **Verify:** `curl -s -o /dev/null -w '%{http_code}' https://<frontend>.vercel.app/` → `200`, and the page in a browser shows 10 rows with both store columns populated.
+  1. Nothing to deploy — the config landed at T-3.3. Confirm `https://<project>.vercel.app/` is the dashboard and that its PATCH goes to the same origin (i.e. `NEXT_PUBLIC_API_URL` is unset, so T-2.9 sends the browser to a relative path).
+- **Files / artifacts:** none
+- **Done when:** the deployed dashboard loads live data from the same domain as the API.
+- **Verify:** `curl -s -o /dev/null -w '%{http_code}' https://<project>.vercel.app/` → `200`, and the page in a browser shows 10 rows with both store columns populated.
 - **Evidence:** `-`
 - **Blocks:** `T-3.6`, `T-4.1`
 
-### [ ] T-3.6 — Restrict CORS to the deployed frontend origin
+### [ ] T-3.6 — Confirm the CORS stance for a single-origin deployment
 
 - **Depends on:** `T-3.5`
 - **Size:** `S`
-- **Why:** §3.2.1 names CORS explicitly; the deployed API is otherwise callable from any page.
+- **Why:** §3.2.1 names CORS explicitly. **Revised 2026-09-20:** with both apps in one deployment the browser calls the API on its own origin, so no CORS headers are involved and none are exercised. The middleware stays — it is still what local dev (two ports) and the two-project fallback rely on — but this task can no longer demonstrate a cross-origin rejection on the deployed path, and the evidence must say so instead of appearing to prove more.
 - **Do:**
-  1. Set `ALLOWED_ORIGIN` to the T-3.5 URL in the backend Vercel project and redeploy.
+  1. Set `ALLOWED_ORIGIN` to the deployed URL in the project and redeploy, then confirm the deployed dashboard updates a row with nothing CORS-related in the console.
 - **Files / artifacts:** Vercel env var (dashboard) — the app already reads `config.allowedOrigin` from T-1.7
-- **Done when:** browser requests from the dashboard succeed and others are rejected.
-- **Verify:** the deployed dashboard updates a row without a CORS error in the console; `curl -s -D- -o /dev/null -H 'Origin: https://example.com' https://<backend>.vercel.app/prices | grep -i access-control-allow-origin` → no matching header for the foreign origin.
+- **Done when:** the same-origin deployment is explained rather than assumed, and local/dev CORS still works.
+- **Verify:** the deployed dashboard updates a row without a CORS error; `curl -s -D- -o /dev/null -H 'Origin: https://example.com' https://<project>.vercel.app/prices | grep -i access-control-allow-origin` → no matching header (still true, but now trivially so — the request is same-origin, which is weaker evidence than the original wording implied).
 - **Evidence:** `-`
 - **Blocks:** `T-4.1`
 
@@ -729,7 +748,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   1. Add a root `README.md` covering the architecture (Supabase ← Express → two Shopify stores, Next.js on top), the Env vars table, local run steps, the deployed URLs, and the known simplifications from Open questions.
 - **Files / artifacts:** `README.md`
 - **Done when:** a reader can run both apps and understand the sync flow from the README alone.
-- **Verify:** the README lists every variable in the Env vars table (`grep -c` matches) and both deployed URLs resolve.
+- **Verify:** the README lists every variable in the Env vars table (`grep -c` matches) and the deployed URL resolves — **one** URL since T-3.3's revision, with the `services` config and the binding explained rather than left as magic.
 - **Evidence:** `-`
 - **Blocks:** `T-4.6`
 
@@ -772,7 +791,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   1. Run the baseline refresh for the updated SKU (or a full refresh) and read the endpoint.
 - **Files / artifacts:** none
 - **Done when:** the updated SKU reports both stores `synced`.
-- **Verify:** `curl -s https://<backend>.vercel.app/prices | jq '.[] | select(.sku=="<SKU>") | {central_price, statuses: [.stores.alpha.status, .stores.beta.status], has_mismatch}'` → both `synced`, `has_mismatch: false`.
+- **Verify:** `curl -s https://<project>.vercel.app/prices | jq '.[] | select(.sku=="<SKU>") | {central_price, statuses: [.stores.alpha.status, .stores.beta.status], has_mismatch}'` → both `synced`, `has_mismatch: false`. **Restated 2026-09-20** (T-3.3 revision): one host, same path.
 - **Evidence:** `-`
 - **Blocks:** `T-4.6`
 

@@ -26,7 +26,10 @@ export default function PriceEditor({ sku, price }: { sku: string; price: string
       if (result.error) {
         setMessage(result.error);
       } else {
-        const failed = (result.stores ?? []).filter((s: { status: string }) => s.status !== 'synced');
+          // `updatePrice` returns the body as-is (T-2.2), so the shape is declared here rather than
+          // left as `any` — `next build` typechecks, and an untyped callback fails the build.
+          const stores: { store: string; status: string; error?: string | null }[] = result.stores ?? [];
+          const failed = stores.filter((s) => s.status !== 'synced');
         setMessage(failed.length ? failed.map((s) => `${s.store}: ${s.error ?? s.status}`).join(' · ') : null);
         // §3.4.3 — the row must show the new central price and the new statuses without a manual
         // reload. `refresh()` re-runs this page's server component instead of duplicating the

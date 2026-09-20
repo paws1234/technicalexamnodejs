@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "frontend": {
+      "root": "frontend/",
+      "bindings": [{ "type": "service", "service": "backend", "format": "url", "env": "API_URL" }]
+    },
+    "backend": {
+      "root": "backend/",
+      "framework": "express"
+    }
+  },
+  "rewrites": [
+    { "source": "/health", "destination": { "service": "backend" } },
+    { "source": "/prices", "destination": { "service": "backend" } },
+    { "source": "/prices/(.*)", "destination": { "service": "backend" } },
+    { "source": "/(.*)", "destination": { "service": "frontend" } }
+  ]
+}

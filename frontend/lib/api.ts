@@ -1,7 +1,18 @@
-// The one place the backend's address is written down. NEXT_PUBLIC_* is inlined at build time,
-// so pointing the dashboard at the deployed API (T-3.5) is an env change, not a code change.
-// Nothing secret belongs here — a NEXT_PUBLIC_ value ships to the browser.
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+// The one place the backend's address is written down. Two callers need two different answers:
+//   * the browser uses the public origin — either NEXT_PUBLIC_API_URL (two Vercel projects, local
+//     dev, the compose stack) or nothing at all, which makes the paths relative (`/prices`) and
+//     works whenever the dashboard and the API sit behind one deployment;
+//   * a server component runs *inside* the deployment, where the API is reachable on an internal
+//     address: `API_URL`, which docker-compose sets to `http://backend:3000` and Vercel Services
+//     injects from a service binding. Without it the server-side fetch would go to `localhost`
+//     inside its own container — the bug the compose file's comment predicted.
+// NEXT_PUBLIC_* is inlined at build time, so pointing the dashboard at a deployed API (T-3.5) is
+// an env change, not a code change. Nothing secret belongs here — it ships to the browser.
+const PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
+const API_URL = (typeof window === 'undefined' ? process.env.API_URL ?? PUBLIC_API_URL : PUBLIC_API_URL).replace(
+  /\/+$/,
+  '', // a service binding hands over a base URL; trim any trailing slash so joins stay honest
+);
 
 // §3.2.3 — every SKU with its central price and each store's last known state, flagged when a
 // store has drifted. The status is checked before the body is returned, so a backend that is
