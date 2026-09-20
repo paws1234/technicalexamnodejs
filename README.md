@@ -4,41 +4,38 @@ Task 3 — Centralized price sync. `plan.md` is the architecture, `task.md` the 
 
 ## Run it locally with Docker
 
-`docker compose up --build` needs nothing but Docker. Supabase cloud + Vercel stay the deployment
-path (plan.md Phase 4); this stack exists so the project also runs offline against a stand-in for
-Supabase.
+`docker compose up --build` needs nothing but Docker. Supabase + Vercel stay the deployment path
+(plan.md Phase 4), and the *same* Supabase project is used locally, so there is one database in
+every environment and no local-only branch in the application code.
 
 | Service | Host address | What it is |
 |---|---|---|
 | `frontend` | http://localhost:3001 | Next.js dashboard (T-2.1) |
 | `backend` | http://localhost:3000 | Express API (T-1.1) |
-| `proxy` | http://localhost:54321 | `SUPABASE_URL` — PostgREST behind the `/rest/v1` prefix |
-| `db` | `postgres://postgres:postgres@localhost:5432/postgres` | Postgres holding `products` and `store_sync_status` |
 | `shopify` | profile `tools`, run explicitly | Shopify CLI |
 
-`@supabase/supabase-js` is a PostgREST client: it always requests `<SUPABASE_URL>/rest/v1/<table>`,
-exactly as Supabase's Kong gateway expects. PostgREST has no base-path option, so nginx supplies
-the prefix. The application code therefore needs no local-only branch — only `SUPABASE_URL` and
-`SUPABASE_SERVICE_ROLE_KEY` differ from production, and the compose file sets both.
+The backend reaches Supabase with **node-postgres over the pooler** (decision 2026-09-20,
+`task.md` assumption 10), reading the standard libpq `PG*` variables from `backend/.env` — the
+same contract `psql` and `pg_dump` use, so the app, a manual query and the seed artifacts share
+one credential and one connection profile. The pooler host resolves over IPv4, so the same values
+work from inside a container and from Vercel; no credential is baked into the compose file.
 
 **Today the `backend` and `frontend` services exit immediately** with `Could not read package.json`
-— the app code is T-1.1/T-2.1 and does not exist yet. The database, PostgREST, and proxy run now.
+— the app code is T-1.1/T-2.1 and does not exist yet.
 
-### The database stand-in
+### The database
 
-`backend/seed/schema.sql`, `backend/seed/products.sql` and `docker/postgrest/roles.sql` are loaded
-by the `db` container on its **first** start, on an empty volume, in that order (01/02/03). The
-first two are the plan's own artifacts, so the same SQL recreates the schema in the Supabase SQL
-editor. After editing them: `docker compose down -v && docker compose up -d db postgrest proxy`.
-`docker/postgrest/roles.sql` is local-only and `if not exists`-guarded, so it is harmless on a real
-Supabase project.
-
-Check the stack the way the backend will:
+`backend/seed/schema.sql` and `backend/seed/products.sql` are the plan's own artifacts
+(T-0.11–T-0.13) holding the schema and the 10 SKUs. Both are **already applied** to the Supabase
+project; to re-apply them, or to stand up a fresh project, run them there (SQL editor, or over the
+pooler as below):
 
 ```bash
-KEY=...   # the SUPABASE_SERVICE_ROLE_KEY value in docker-compose.yml — local, not a secret
-curl -s "http://localhost:54321/rest/v1/products?select=sku,price&order=sku" -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
-curl -s "http://localhost:54321/rest/v1/?apikey=$KEY"   # OpenAPI doc: both tables and their columns
+cd backend
+DB="docker run --rm --env-file .env"
+$DB -v "$PWD/seed:/seed:ro" postgres:16 psql -w -v ON_ERROR_STOP=1 -f /seed/schema.sql
+$DB -v "$PWD/seed:/seed:ro" postgres:16 psql -w -v ON_ERROR_STOP=1 -f /seed/products.sql
+$DB postgres:16 psql -w -t -A -c 'select count(*) from products'   # 10
 ```
 
 ### The Shopify CLI

@@ -40,8 +40,8 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 
 | Name | Used by | Where it comes from | Set in |
 |---|---|---|---|
-| `SUPABASE_URL` | backend | Supabase → Project Settings → API | local `backend/.env`, Vercel (backend) |
-| `SUPABASE_SERVICE_ROLE_KEY` | backend | Supabase → Project Settings → API (secret) | local `backend/.env`, Vercel (backend) |
+| `SUPABASE_URL` | — unused: REST route not taken | Supabase → Project Settings → API | local `backend/.env` only |
+| `SUPABASE_SERVICE_ROLE_KEY` | — unused: REST route not taken | Supabase → Project Settings → API (secret) | local `backend/.env` only |
 | `SHOPIFY_ALPHA_STORE` | backend | T-0.2 store handle, `<handle>.myshopify.com` | local `backend/.env`, Vercel (backend) |
 | `SHOPIFY_BETA_STORE` | backend | T-0.2 store handle | local `backend/.env`, Vercel (backend) |
 | `SHOPIFY_CLIENT_ID` | backend | T-0.6 Dev Dashboard app client id — one app, both stores | local `backend/.env`, Vercel (backend) |
@@ -59,12 +59,18 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 
 The `PG*` names are the standard libpq contract: `psql`, `pg_dump` and node-postgres read them
 from the environment with no glue code, so the database connection needs one secret, not four
-values. The owner chose this route for the database, so they are the project's credential; the
-tasks that still read `/rest/v1/` are named in T-0.10's evidence for restatement.
+values.
 
-`SUPABASE_SERVICE_ROLE_KEY` and `SHOPIFY_CLIENT_SECRET` are server-only — they must never appear
-in a `NEXT_PUBLIC_*` variable or in client-side code. `PGPASSWORD` is server-only for the same
-reason. The Admin API token itself is never stored:
+**Data layer decided 2026-09-20 (owner):** the backend reaches the Supabase **database** with
+node-postgres over the pooler — the same `PG*` contract `psql` already uses — from local dev and
+from Vercel alike. `@supabase/supabase-js` and the PostgREST `/rest/v1/` route are **not** used,
+so `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` sit in `backend/.env` unused, are not needed in
+Vercel (T-3.3), and every `/rest/v1/` `Verify` in this file has been restated as a direct SQL
+query. Local and production therefore differ only in the pooler's address, and reachability is
+the one already proved at T-0.10 (pooler resolves over IPv4, reached from a container).
+
+`SHOPIFY_CLIENT_SECRET` and `PGPASSWORD` are server-only — they must never appear in a
+`NEXT_PUBLIC_*` variable or in client-side code. The Admin API token itself is never stored:
 it is minted per store at runtime and cached until it expires (T-1.5).
 
 ## Open questions / assumptions
@@ -78,6 +84,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 7. **Repo layout is unspecified.** §3.4.1/§3.4.2 allow "separate project or integrated frontend". Assumption: one repo, `backend/` and `frontend/` as sibling Vercel projects.
 8. **Currency.** Assumption: single currency; all prices are 2-decimal `numeric(10,2)` and each store's defaults accept them.
 9. **Express on Vercel has no default entry point.** Assumption: a thin serverless adapter is added in T-3.2 rather than switching frameworks.
+10. **Data layer.** §3.2.2 says "Supabase client". **Decided 2026-09-20:** node-postgres (`pg`) over the Supabase pooler, not `@supabase/supabase-js` over PostgREST — one credential contract (`PG*`) shared by `psql`, the seed artifacts and the app; no local-only branch; the local engine is the same engine as production. Consequence carried into T-1.1, T-1.2, T-1.3, T-1.9, T-3.3 and the `/rest/v1/` `Verify` lines.
 
 ---
 
@@ -191,7 +198,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Done when:** both files list all 9 backend variables and `.env` is ignored by git.
 - **Verify:** `git check-ignore -v backend/.env` → prints the ignore rule; `cut -d= -f1 backend/.env.example | sort` → all 9 names from the Env vars table.
 - **Evidence:** 2026-09-20 — files created at the user's explicit request, ahead of `T-0.6`/`T-0.7`. Both structural checks pass: `git check-ignore -v backend/.env` → `.gitignore:2:.env       backend/.env` (exit 0), and `cut -d= -f1 backend/.env.example | sort` → exactly the 9 Env-vars-table names (count 9), with the same 9 names present in `backend/.env`. `git status --short -uall` lists only `?? backend/.env.example` while `git status --ignored backend/` lists `!! backend/.env`. `SHOPIFY_API_VERSION` pinned to `2026-07`, confirmed "Latest stable" (accessible until 2027-07-16) on `shopify.dev/docs/api/usage/versioning`. Left `[~]`: six values in `backend/.env` are still blank — two of them secret (`SUPABASE_SERVICE_ROLE_KEY`, `SHOPIFY_CLIENT_SECRET`) and four not (`SUPABASE_URL`, both store domains, `SHOPIFY_CLIENT_ID`) — so `Do` step 2 is unsatisfied. Renamed 2026-09-20: `SHOPIFY_ALPHA_TOKEN`/`SHOPIFY_BETA_TOKEN` became `SHOPIFY_CLIENT_ID`/`SHOPIFY_CLIENT_SECRET` (still 9 backend names), because admin-created custom apps can no longer be created — see assumption 1. **Closed 2026-09-20** after the four non-Supabase blanks were filled: both `Verify` commands re-run, `git check-ignore -v backend/.env` → `.gitignore:2:.env       backend/.env` (exit 0) and `cut -d= -f1 backend/.env.example | sort` → the 9 Env-vars names, the name-set `diff` against `grep -E '^[A-Z_]+=' backend/.env | cut -d= -f1 | sort` empty (identical lists). The four Shopify values are real rather than `.env.example` placeholders (checked per-name without printing values), and the nearest live proof is `node backend/scripts/shopify-token.mjs alpha` then `beta` → `OK … token=<masked> scope=read_analytics,…,write_products expires_in=86399`, exit 0 each — so the store domains and client id/secret in the file are genuine and usable. Also corrected the file's own header comment, which still claimed six blanks below it.
-- **Deferred:** `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are still blank, which `Do` step 2 explicitly allows "until T-0.10 exists" — T-0.10 fills them and T-1.2's `config.js` refuses to start until it has.
+- **Deferred:** `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are still blank, which `Do` step 2 explicitly allows "until T-0.10 exists" — T-0.10 fills them and T-1.2's `config.js` refuses to start until it has. **Corrected 2026-09-20 (owner decision):** the data layer is node-postgres over the pooler, so T-1.2 no longer requires either name and these two blanks are inert rather than blocking. This task's own `Verify` commands are unchanged and still pass.
 - **Blocks:** `T-1.2`, `T-3.3`
 
 ### [x] T-0.9 — Prove the SKU→variant lookup works against Alpha
@@ -224,7 +231,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Verify:** `timeout 120 docker run --rm --env-file backend/.env postgres:16 psql -w -c 'select current_user, current_database()'` → prints `postgres | postgres` and exits 0. It reads the file's own values, so a wrong host, port, database, user or password fails it. Corroboration that `SUPABASE_URL` is the same project: `curl -s -o /dev/null -w '%{http_code}' "$SUPABASE_URL/rest/v1/"` → `401` (a live project answering an unauthenticated request).
 - **Evidence:** 2026-09-20 — **project identified, proved live, and reachable.** The project exists: the pooler connection string the user supplied (`postgres.xnablaneqqhvmuddqroq@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres`) carries the project ref in its username, and the REST hostname is always `https://<project-ref>.supabase.co`, so `SUPABASE_URL` was **derived, not guessed**, and then proved live: `curl -s -o /dev/null -w '%{http_code}' https://xnablaneqqhvmuddqroq.supabase.co/rest/v1/` → **401** `{"message":"No API key found in request","hint":"No 'apikey' request header or url param was found."}` — a real project rejecting an unauthenticated call, not a 404. Control `nosuchprojectref000000.supabase.co` fails DNS entirely (`000`, no response body), so the 401 discriminates. Host is IPv4-only (`172.64.149.246`, `104.18.38.10`), so containers and Vercel can reach it. `backend/.env` now holds that URL, and `SUPABASE_SERVICE_ROLE_KEY` is still blank — on the route this task closed on, nothing needs it. The `Verify` the plan originally wrote (an `apikey` header turning that 401 into a 200) is the REST route, which the decision below supersedes: the DB password is a Postgres wire credential rather than an API key, so it reaches the same database, just not through `/rest/v1/`. A new `SUPABASE_DB_*` name was initially declined — it would break T-0.8's verified "exactly the 9 named variables" contract and T-1.2's "reads exactly the names in `.env.example`". The owner then directed it be added, and it went in as the standard `PG*` names below; T-0.8's check was re-run afterwards and still passes, with all 9 original names present. The pooler host does resolve to IPv4 from here (`54.64.190.72`, `35.79.125.133`, `52.68.3.1`), so that route stays open for those tasks if they are run from the repo instead of the SQL editor.
 - **Database config added (owner-directed, 2026-09-20):** the pooler parameters are now in `backend/.env`, templated in `backend/.env.example`, under the standard libpq names `PGHOST`/`PGPORT`/`PGDATABASE`/`PGUSER`/`PGPASSWORD`/`PGSSLMODE` — **every value fixed except `PGPASSWORD`, which is the only thing left to fill in.** No code consumes them yet and none is needed: `psql`, `pg_dump` and node-postgres 8.23.0 (`lib/connection-parameters.js`: `process.env['PG' + key.toUpperCase()]`, and `PGSSLMODE` → SSL) all read that contract straight from the environment. Proved **without** the real password by sending a deliberately wrong one: `docker run --rm -e PGUSER=postgres.xnablaneqqhvmuddqroq -e PGPASSWORD=<wrong> -e PGSSLMODE=require postgres:16 psql -w -c 'select 1'` → `FATAL: password authentication failed for user "postgres"`, i.e. the pooler routed to the right tenant and accepted host/port/database/user/TLS, rejecting only the secret. Control: the same probe with `PGUSER=postgres` (no project ref) → `FATAL: (ENOIDENTIFIER) no tenant identifier provided`, so the `<ref>`-bearing username is required and the two outcomes discriminate. The pooler resolves over IPv4 here (`52.68.3.1`, `54.64.190.72`, `35.79.125.133`), so this works from containers too, unlike `db.<ref>.supabase.co`.
-- **Decision taken 2026-09-20 (owner):** the database is reached over the pooler, so the `PG*` values are the project's credential and `SUPABASE_SERVICE_ROLE_KEY` is **not required** — not for this task, and not for Phase 0. Consequences to carry forward, named so the next run does not rediscover them: the `Verify` steps of T-0.11, T-0.12, T-0.13, T-0.14, T-1.3, T-1.9, T-1.13, T-1.14, T-1.15, T-1.17, T-3.4 and T-4.3 still curl `/rest/v1/`, and the data layer named in T-1.1/T-1.3/T-1.9 is still `@supabase/supabase-js` (REST only) rather than `pg` over the pooler; T-3.3's Vercel variable list follows from whichever wins. Those edits are a separate pass and were deliberately not made here.
+- **Decision taken 2026-09-20 (owner):** the database is reached over the pooler, so the `PG*` values are the project's credential and `SUPABASE_SERVICE_ROLE_KEY` is **not required** — not for this task, and not for Phase 0. Consequences to carry forward, named so the next run does not rediscover them: the `Verify` steps of T-0.11, T-0.12, T-0.13, T-0.14, T-1.3, T-1.9, T-1.13, T-1.14, T-1.15, T-1.17, T-3.4 and T-4.3 still curl `/rest/v1/`, and the data layer named in T-1.1/T-1.3/T-1.9 is still `@supabase/supabase-js` (REST only) rather than `pg` over the pooler; T-3.3's Vercel variable list follows from whichever wins. Those edits are a separate pass and were deliberately not made here. **Applied 2026-09-20 (owner decided the data layer):** the pass was made — T-1.1 installs `pg` instead of `@supabase/supabase-js`, T-1.3 is now the `pg.Pool` module (`backend/src/db.js`), T-1.9 joins two `pg` queries, T-3.3's variable list is the six `PG*` names plus the four `SHOPIFY_*` names and `ALLOWED_ORIGIN`, and every `/rest/v1/` `Verify` named above is restated as a direct SQL query. This task's own `Verify` is unchanged and still passes.
 - **Verified 2026-09-20:** the owner filled `PGPASSWORD`, and the restated `Verify` ran green — `docker run --rm --env-file backend/.env postgres:16 psql -w -c 'select current_user, current_database()'` → `postgres | postgres`, **exit 0**, server `PostgreSQL 17.6`; `SUPABASE_URL` from the file answers `401` at `/rest/v1/`, so it is the same live project. The same credential reports the cloud project's `public` schema as holding **0 tables**, i.e. T-0.11–T-0.13 have not been applied there yet. The password's value was never read into the transcript — only its length was measured (`awk -F= '/^PGPASSWORD=/{print length($2)}'` → `16`).
 - **Blocks:** `T-0.11`, `T-0.12`, `T-0.13`, `T-1.3`
 
@@ -288,13 +295,13 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 
 - **Depends on:** `T-0.14`
 - **Size:** `S`
-- **Why:** §3.2.1 — Express, CORS, and the Supabase client, configured for serverless deployment.
+- **Why:** §3.2.1 — Express, CORS, and the database client, configured for serverless deployment.
 - **Do:**
-  1. `npm init -y` in `backend/`, then install `express`, `cors`, `@supabase/supabase-js`, `dotenv`.
+  1. `npm init -y` in `backend/`, then install `express`, `cors`, `pg`, `dotenv`.
   2. Set `"type": "module"` and add `start` / `dev` scripts.
 - **Files / artifacts:** `backend/package.json`, `backend/package-lock.json`
 - **Done when:** the three named dependencies resolve from `backend/`.
-- **Verify:** `cd backend && npm ls --depth=0` lists `express`, `cors`, `@supabase/supabase-js`; `node -e "import('express')"` exits 0.
+- **Verify:** `cd backend && npm ls --depth=0` lists `express`, `cors`, `pg`; `node -e "import('express')"` exits 0.
 - **Evidence:** `-`
 - **Blocks:** `T-1.2`, `T-1.7`
 
@@ -304,23 +311,23 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Size:** `S`
 - **Why:** a missing Shopify token must be a startup error, not a half-synced store at request time.
 - **Do:**
-  1. Export `config` reading exactly the names in `backend/.env.example` (via `dotenv`) and throw naming the first missing variable.
+  1. Export `config` reading the names the app actually uses — `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGSSLMODE`, the four `SHOPIFY_*` names, `ALLOWED_ORIGIN`, `PORT` — via `dotenv`, and throw naming the first missing one. The two unused `SUPABASE_*` names stay in `.env.example` but are not required (decision 2026-09-20), so the blank `SUPABASE_SERVICE_ROLE_KEY` must not stop startup.
 - **Files / artifacts:** `backend/src/config.js`
 - **Done when:** loading it with a complete `.env` succeeds and reports the variable names (never the values); loading it with one variable removed fails loudly.
 - **Verify:** `node -e "import('./backend/src/config.js').then(c=>console.log(Object.keys(c.config).join(',')))"` → lists all keys; `env -u SHOPIFY_CLIENT_SECRET node -e "import('./backend/src/config.js')"` → non-zero exit whose message contains `SHOPIFY_CLIENT_SECRET`.
 - **Evidence:** `-`
 - **Blocks:** `T-1.3`, `T-1.4`, `T-1.5`
 
-### [ ] T-1.3 — Add the Supabase client module
+### [ ] T-1.3 — Add the database module
 
 - **Depends on:** `T-1.2`, `T-0.13`
 - **Size:** `S`
 - **Why:** §3.2.2 — the shared connection routine the whole query layer uses.
 - **Do:**
-  1. Export one service-role Supabase client from `backend/src/supabase.js`.
-- **Files / artifacts:** `backend/src/supabase.js`
+  1. Export one shared `pg.Pool` from `backend/src/db.js`. No glue code: node-postgres reads `PG*` from the environment by itself. Create the pool at **module scope** so a warm serverless instance reuses it, and keep `max` small — the pooler is in **session** mode, so every held connection occupies one of the project's pool slots for the life of the session.
+- **Files / artifacts:** `backend/src/db.js`
 - **Done when:** a query through the module returns seeded rows.
-- **Verify:** `node -e "import('./backend/src/supabase.js').then(({supabase})=>supabase.from('products').select('sku')).then(r=>console.log(r.data.length, r.error))"` → `10 null`.
+- **Verify:** `node --env-file=backend/.env -e "import('./backend/src/db.js').then(({pool})=>pool.query('select sku from products')).then(r=>console.log(r.rows.length))"` → `10`.
 - **Evidence:** `-`
 - **Blocks:** `T-1.9`, `T-1.13`
 
@@ -396,7 +403,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Size:** `M`
 - **Why:** §3.2.2/§3.2.3 — fetches the catalogue plus the per-store sync logs that `GET /prices` aggregates.
 - **Do:**
-  1. Create `backend/src/queries.js` exporting `listPrices()` — one Supabase select over `products` with the related `store_sync_status` rows embedded per SKU (or two selects joined in JS if the relationship is not exposed).
+  1. Create `backend/src/queries.js` exporting `listPrices()` — two `pg` queries joined in JS: all of `products`, and all of `store_sync_status` grouped by SKU. (PostgREST's embedded-resource syntax does not exist on this route.)
 - **Files / artifacts:** `backend/src/queries.js`
 - **Done when:** the function returns 10 SKUs, each carrying up to two store status records.
 - **Verify:** `node -e "…listPrices().then(r=>console.log(r.length, JSON.stringify(r[0])))"` → `10` and the first item contains the SKU, its central price, and its store status entries.
@@ -438,7 +445,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Do:**
   1. In `backend/src/app.js`, reject a missing/negative/non-numeric/over-2-decimal `price` with 400 and an unknown SKU with 404, before any write.
 - **Files / artifacts:** `backend/src/app.js` (edit)
-- **Done when:** bad input never reaches Supabase or Shopify.
+- **Done when:** bad input never reaches the database or Shopify.
 - **Verify:** `curl -s -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"price":"abc"}' localhost:3000/prices/SKU-001` → `400`; `… -d '{"price":-1}'` → `400`; `… -d '{"price":9.99}' localhost:3000/prices/NOPE` → `404`.
 - **Evidence:** `-`
 - **Blocks:** `T-1.13`
@@ -452,7 +459,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   1. Update `products.price` (and `updated_at`) for the SKU, then continue to the sync step.
 - **Files / artifacts:** `backend/src/app.js` (edit), `backend/src/queries.js` (edit if the update helper lives there)
 - **Done when:** a valid PATCH persists the new central price.
-- **Verify:** `curl -s -X PATCH -H 'Content-Type: application/json' -d '{"price":21.50}' localhost:3000/prices/SKU-001` → 2xx, and `curl -s "$SUPABASE_URL/rest/v1/products?sku=eq.SKU-001&select=price" -H "apikey: $SUPABASE_SERVICE_ROLE_KEY"` → `21.50`.
+- **Verify:** `curl -s -X PATCH -H 'Content-Type: application/json' -d '{"price":21.50}' localhost:3000/prices/SKU-001` → 2xx, and `docker run --rm --env-file backend/.env postgres:16 psql -w -t -A -c "select price from products where sku='SKU-001'"` → `21.50`.
 - **Evidence:** `-`
 - **Blocks:** `T-1.14`, `T-1.18`
 
@@ -465,7 +472,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   1. For each store in the registry: `findVariantBySku` → `updateVariantPrice` → upsert `store_sync_status` with `status: 'synced'`, the new `live_price`, and `last_synced_at`.
 - **Files / artifacts:** `backend/src/app.js` (edit), `backend/src/queries.js` (edit for the upsert helper)
 - **Done when:** one PATCH updates both stores' live prices and leaves both rows `synced`.
-- **Verify:** PATCH `SKU-001` to `22.00` → then Alpha and Beta admin both show `22.00` for `SKU-001` (UI observation), and `curl -s "$SUPABASE_URL/rest/v1/store_sync_status?sku=eq.SKU-001&select=store,status,live_price" …` → two rows, both `synced` / `22.00`.
+- **Verify:** PATCH `SKU-001` to `22.00` → then Alpha and Beta admin both show `22.00` for `SKU-001` (UI observation), and `docker run --rm --env-file backend/.env postgres:16 psql -w -c "select store, status, live_price from store_sync_status where sku='SKU-001' order by store"` → two rows, both `synced` / `22.00`.
 - **Evidence:** `-`
 - **Blocks:** `T-1.15`, `T-1.16`, `T-1.18`
 
@@ -587,7 +594,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   1. Add a client component with a numeric input (pre-filled with the central price) and an Update button per row that calls `updatePrice(sku, price)`; disable the button while the request is in flight.
 - **Files / artifacts:** `frontend/components/PriceEditor.tsx`, `frontend/app/page.tsx` (edit)
 - **Done when:** submitting a row sends exactly one PATCH for that SKU.
-- **Verify:** change `SKU-004` to a new value in the browser and click Update → the backend log shows `PATCH /prices/SKU-004`, and `curl -s "$SUPABASE_URL/rest/v1/products?sku=eq.SKU-004&select=price" …` shows the new value.
+- **Verify:** change `SKU-004` to a new value in the browser and click Update → the backend log shows `PATCH /prices/SKU-004`, and `docker run --rm --env-file backend/.env postgres:16 psql -w -t -A -c "select price from products where sku='SKU-004'"` shows the new value.
 - **Evidence:** `-`
 - **Blocks:** `T-2.6`, `T-2.7`
 
@@ -667,7 +674,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Size:** `M`
 - **Why:** §3.4.1 — "configure all secure environment variables (Supabase keys and Shopify store credentials/tokens)".
 - **Do:**
-  1. Create the Vercel project from `backend/` and add every server-side variable from the Env vars table in the project settings (never in the repo).
+  1. Create the Vercel project from `backend/` and add every server-side variable from the Env vars table in the project settings (never in the repo) — on the decided data layer (2026-09-20) that is the six `PG*` names, the four `SHOPIFY_*` names and `ALLOWED_ORIGIN`. `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` are not needed: the app does not read them.
 - **Files / artifacts:** Vercel project config (dashboard)
 - **Done when:** the deployed backend answers and can reach both Shopify stores and Supabase.
 - **Verify:** `curl -s -o /dev/null -w '%{http_code}' https://<backend>.vercel.app/health` → `200`.
@@ -739,7 +746,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   1. On the deployed dashboard, change one SKU to a clearly new price and submit.
 - **Files / artifacts:** none
 - **Done when:** the request succeeds and the central price is persisted.
-- **Verify:** the UI shows the new price after T-2.6's refresh; `curl -s "$SUPABASE_URL/rest/v1/products?sku=eq.<SKU>&select=price" -H "apikey: $SUPABASE_SERVICE_ROLE_KEY"` → the new value.
+- **Verify:** the UI shows the new price after T-2.6's refresh; `docker run --rm --env-file backend/.env postgres:16 psql -w -t -A -c "select price from products where sku='<SKU>'"` → the new value.
 - **Evidence:** `-`
 - **Blocks:** `T-4.2`, `T-4.6`
 
