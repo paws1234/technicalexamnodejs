@@ -34,13 +34,20 @@ const NAMES = {
   shopifyApiVersion: 'SHOPIFY_API_VERSION',
 };
 
+// PORT is deliberately the one optional name: the Env vars table marks it local-only,
+// and the deployed entry (`src/app.js`, which Vercel wraps itself) never calls listen,
+// so a deployment without it is complete. Requiring it made every deployed route 500
+// with "Missing required environment variable(s): PORT". The fallback is the value a
+// local run uses when .env omits it; every other name below stays a startup error.
+const OPTIONAL = new Map([['PORT', '3000']]);
+
 // Report every missing name at once, so one run fixes the whole .env rather than one
 // variable per attempt. Names only — never values.
-const missing = Object.values(NAMES).filter((name) => !process.env[name]);
+const missing = Object.values(NAMES).filter((name) => !process.env[name] && !OPTIONAL.has(name));
 if (missing.length > 0) {
   throw new Error(`Missing required environment variable(s): ${missing.join(', ')}`);
 }
 
 export const config = Object.fromEntries(
-  Object.entries(NAMES).map(([key, name]) => [key, process.env[name]]),
+    Object.entries(NAMES).map(([key, name]) => [key, process.env[name] || OPTIONAL.get(name)]),
 );
