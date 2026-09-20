@@ -28,13 +28,13 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 
 | Phase | Tasks | Done / Total | Status |
 |---|---|---|---|
-| 0 — Environment & Store Preparation | 14 | 10 / 14 | in progress |
+| 0 — Environment & Store Preparation | 14 | 13 / 14 | in progress |
 | 1 — Central Backend Service Development | 18 | 0 / 18 | not started |
 | 2 — Frontend Dashboard Development | 8 | 0 / 8 | not started |
 | 3 — Deployment | 7 | 0 / 7 | not started |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 10 / 53 done
+**Overall:** 13 / 53 done
 
 ## Environment variables
 
@@ -228,7 +228,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Verified 2026-09-20:** the owner filled `PGPASSWORD`, and the restated `Verify` ran green — `docker run --rm --env-file backend/.env postgres:16 psql -w -c 'select current_user, current_database()'` → `postgres | postgres`, **exit 0**, server `PostgreSQL 17.6`; `SUPABASE_URL` from the file answers `401` at `/rest/v1/`, so it is the same live project. The same credential reports the cloud project's `public` schema as holding **0 tables**, i.e. T-0.11–T-0.13 have not been applied there yet. The password's value was never read into the transcript — only its length was measured (`awk -F= '/^PGPASSWORD=/{print length($2)}'` → `16`).
 - **Blocks:** `T-0.11`, `T-0.12`, `T-0.13`, `T-1.3`
 
-### [ ] T-0.11 — Create the `products` table
+### [x] T-0.11 — Create the `products` table
 
 - **Depends on:** `T-0.10`
 - **Size:** `S`
@@ -237,11 +237,11 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   1. In the Supabase SQL editor, create `products` with `sku text primary key`, `name text not null`, `price numeric(10,2) not null`, `updated_at timestamptz not null default now()`.
 - **Files / artifacts:** `backend/seed/schema.sql` (kept in-repo so the schema is reproducible)
 - **Done when:** the table exists with those four columns.
-- **Verify:** `curl -s "$SUPABASE_URL/rest/v1/?apikey=$SUPABASE_SERVICE_ROLE_KEY" | jq -r '.definitions.products.properties | keys[]'` → `name`, `price`, `sku`, `updated_at`.
-- **Evidence:** `-`
+- **Verify:** `timeout 180 docker run --rm --env-file backend/.env postgres:16 psql -w -c "select column_name from information_schema.columns where table_schema='public' and table_name='products' order by column_name"` → `name`, `price`, `sku`, `updated_at`, exit 0. **Restated 2026-09-20** from the `/rest/v1/` OpenAPI curl the task originally carried: `SUPABASE_SERVICE_ROLE_KEY` is deliberately blank (T-0.10), so the REST route cannot answer, and the pooler is the database credential this project actually holds.
+- **Evidence:** 2026-09-20 — **verified**. The cloud project's `public` schema held **0 tables** beforehand (pre-flight `select table_name from information_schema.tables where table_schema='public'` → `(0 rows)`, exit 0), so these four columns are new. `Do` step 1's artifact `backend/seed/schema.sql` already existed from an earlier session, so the work was applying it rather than writing it: `docker run --rm --env-file backend/.env -v <repo>/backend/seed:/seed:ro postgres:16 psql -w -v ON_ERROR_STOP=1 -f /seed/schema.sql` → `CREATE TABLE` `CREATE TABLE`, exit 0. Run over the pooler instead of the SQL editor because the file is the task's own artifact — identical DDL either way, but this route is non-interactive and matches the credential T-0.10 closed on. The restated `Verify` then ran green: `select column_name, data_type, is_nullable from information_schema.columns where table_schema='public' and table_name='products' order by column_name` → `name text NO`, `price numeric NO`, `sku text NO`, `updated_at timestamp with time zone NO`, exit 0 — the task's expected `name, price, sku, updated_at` exactly, plus the `not null` half of its `Do` steps. The same file also created `store_sync_status` (one artifact, `if not exists` throughout), which T-0.12 verifies on its own terms.
 - **Blocks:** `T-0.12`, `T-0.13`, `T-1.9`
 
-### [ ] T-0.12 — Create the `store_sync_status` table
+### [x] T-0.12 — Create the `store_sync_status` table
 
 - **Depends on:** `T-0.11`
 - **Size:** `S`
@@ -250,11 +250,11 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   1. Create `store_sync_status` with `store text not null`, `sku text not null references products(sku) on delete cascade`, `live_price numeric(10,2)`, `status text not null check (status in ('synced','mismatch','failed'))`, `last_synced_at timestamptz`, `error text`, primary key `(store, sku)`.
 - **Files / artifacts:** `backend/seed/schema.sql` (append)
 - **Done when:** the table exists with that primary key and status constraint.
-- **Verify:** `curl -s "$SUPABASE_URL/rest/v1/?apikey=$SUPABASE_SERVICE_ROLE_KEY" | jq -r '.definitions.store_sync_status.properties | keys[]'` → `error`, `last_synced_at`, `live_price`, `sku`, `status`, `store`; inserting `status: 'bogus'` via `POST /rest/v1/store_sync_status` is rejected with a check-constraint error.
-- **Evidence:** `-`
+- **Verify:** `timeout 180 docker run --rm --env-file backend/.env postgres:16 psql -w -c "select column_name from information_schema.columns where table_schema='public' and table_name='store_sync_status' order by column_name"` → `error`, `last_synced_at`, `live_price`, `sku`, `status`, `store`, exit 0; `… -c "select pg_get_constraintdef(oid) from pg_constraint where conrelid='public.store_sync_status'::regclass"` → the `status` check, the `(store, sku)` primary key and the `on delete cascade` foreign key; and a `status: 'bogus'` insert is rejected with a check-constraint error. **Restated 2026-09-20** from the `/rest/v1/` curl for the same reason as T-0.11 — `SUPABASE_SERVICE_ROLE_KEY` is deliberately blank, so the REST route cannot answer.
+- **Evidence:** 2026-09-20 — **verified**. The table came from the same `backend/seed/schema.sql` run T-0.11 recorded (one artifact carries both tables, and both tasks name that file), so this task's own work was the verification. Columns: `select column_name, data_type, is_nullable from information_schema.columns where table_schema='public' and table_name='store_sync_status' order by column_name` → `error text YES`, `last_synced_at timestamp with time zone YES`, `live_price numeric YES`, `sku text NO`, `status text NO`, `store text NO`, exit 0 — the task's expected six names exactly. Structure, which the original `keys[]` check would not have covered: `select contype, pg_get_constraintdef(oid) from pg_constraint where conrelid='public.store_sync_status'::regclass order by contype` → `c CHECK ((status = ANY (ARRAY['synced'::text, 'mismatch'::text, 'failed'::text])))`, `f FOREIGN KEY (sku) REFERENCES products(sku) ON DELETE CASCADE`, `p PRIMARY KEY (store, sku)`, exit 0 — i.e. exactly the primary key and status constraint the `Done when` line names. Rejection test, restated from `POST /rest/v1/store_sync_status` to the same database: `begin; insert into store_sync_status (store, sku, status) values ('alpha','SKU-001','bogus'); rollback;` → `ERROR: new row for relation "store_sync_status" violates check constraint "store_sync_status_status_check"`, exit 1, and the explicit `rollback` means no row was left behind to assert about.
 - **Blocks:** `T-0.13`, `T-1.9`, `T-1.14`
 
-### [ ] T-0.13 — Insert the 10 SKUs into `products`
+### [x] T-0.13 — Insert the 10 SKUs into `products`
 
 - **Depends on:** `T-0.3`, `T-0.11`
 - **Size:** `S`
@@ -263,8 +263,8 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   1. Add one `insert into products (sku, name, price) values (…)` statement with all 10 seed rows to `backend/seed/products.sql` and run it in the SQL editor.
 - **Files / artifacts:** `backend/seed/products.sql`
 - **Done when:** `products` holds exactly the 10 seeded SKUs with their central prices.
-- **Verify:** `curl -s "$SUPABASE_URL/rest/v1/products?select=sku,price&order=sku" -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" | jq 'length'` → `10`.
-- **Evidence:** `-`
+- **Verify:** `timeout 180 docker run --rm --env-file backend/.env postgres:16 psql -w -t -A -c "select count(*) from products"` → `10`, exit 0; and the stored rows diffed against `backend/seed/products.json` → no difference. **Restated 2026-09-20** from the `/rest/v1/products` curl for the same reason as T-0.11/T-0.12 — the service-role key is deliberately blank.
+- **Evidence:** 2026-09-20 — **verified**. `Do` step 1's artifact `backend/seed/products.sql` was already complete (its 10 rows were taken from `products.json` at T-0.3 and proved row-for-row identical there), so the work was running it: `psql -w -v ON_ERROR_STOP=1 -f /seed/products.sql` → `INSERT 0 10`, exit 0. Restated `Verify` → `10`, exit 0. Stronger than the count, and covering the `Done when` line's "exactly the 10 seeded SKUs with their central prices": `select sku, name, price from products order by sku` rendered as CSV and diffed against the same three fields built from `backend/seed/products.json` → `IDENTICAL (exit 0)`, so the cloud rows match the checked-in seed 1:1 on sku, name and 2-decimal price. `10` is the expected count and not a lower bound because T-0.11's pre-flight proved the table was empty beforehand.
 - **Blocks:** `T-1.3`, `T-1.9`, `T-1.17`
 
 ### [ ] T-0.14 — Phase 0 smoke test — both stores and the database are reachable with the documented credentials
