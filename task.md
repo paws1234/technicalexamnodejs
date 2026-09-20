@@ -29,12 +29,12 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | Phase | Tasks | Done / Total | Status |
 |---|---|---|---|
 | 0 — Environment & Store Preparation | 14 | 14 / 14 | complete |
-| 1 — Central Backend Service Development | 18 | 0 / 18 | not started |
+| 1 — Central Backend Service Development | 18 | 1 / 18 | in progress |
 | 2 — Frontend Dashboard Development | 8 | 0 / 8 | not started |
 | 3 — Deployment | 7 | 0 / 7 | not started |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 14 / 53 done
+**Overall:** 15 / 53 done
 
 ## Environment variables
 
@@ -291,7 +291,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 
 ## Phase 1 — Central Backend Service Development
 
-### [ ] T-1.1 — Scaffold the backend Node project
+### [x] T-1.1 — Scaffold the backend Node project
 
 - **Depends on:** `T-0.14`
 - **Size:** `S`
@@ -302,7 +302,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/package.json`, `backend/package-lock.json`
 - **Done when:** the three named dependencies resolve from `backend/`.
 - **Verify:** `cd backend && npm ls --depth=0` lists `express`, `cors`, `pg`; `node -e "import('express')"` exits 0.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `Do` steps run as written: `npm init -y` in `backend/`, then `npm install express cors pg dotenv --no-audit --no-fund` → `added 85 packages in 3s`. The committed `backend/package-lock.json` was an **empty stub** (`lockfileVersion 3`, `"packages": {}`, no root deps) and was therefore replaced by npm rather than kept — it declared nothing, so T-1.1 was not partly done as the file's presence suggested. `npm pkg delete main scripts.test` dropped npm-init's `main: index.js` (no such file) and its placeholder `Error: no test specified` script, then `npm pkg set type=module scripts.start="node src/server.js" scripts.dev="node --watch src/server.js"`. `Verify` green: `cd backend && npm ls --depth=0` → `cors@2.8.6`, `dotenv@18.0.1`, `express@5.2.1`, `pg@8.23.0`, **exit 0** with no `extraneous`/`missing` lines, and `node -e "import('express')"` → **exit 0**; `import('pg')` also resolves and exposes `Pool` as a function. `git status --short -uall` shows only `?? backend/package.json` and ` M backend/package-lock.json`; `git check-ignore -v backend/node_modules` → `.gitignore:1:node_modules`, so the installed tree stays untracked. Carried forward: (1) `npm install express` resolves to **express@5.2.1** — path-to-regexp v8, so no bare `*` wildcard routes and no optional-param syntax; nothing in T-1.7/T-1.12 uses either, and Express 5 auto-forwards async handler rejections, which T-1.14/T-1.15's per-store try/catch does not depend on. (2) The `start`/`dev` scripts already name `src/server.js`, so **T-1.8's `Do` step 2 ("point the dev/start npm scripts at it") and its `backend/package.json` edit are already satisfied**; T-1.8 only needs to create the file and confirm.
 - **Blocks:** `T-1.2`, `T-1.7`
 
 ### [ ] T-1.2 — Add `backend/src/config.js` that fails fast on missing env vars
