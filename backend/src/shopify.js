@@ -120,3 +120,106 @@ export async function updateVariantPrice(store, { variantId, productId }, price)
   }
   return variant.price;
 }
+
+// Every image (and any other media) a product carries. The inline fragment is what reaches the
+// `image` field: `media` returns the `Media` interface, which has no `image` of its own.
+export async function productMedia(store, productId) {
+    const data = await adminGraphql(
+        store,
+        `query ($id: ID!) {
+      product(id: $id) {
+        media(first: 20) {
+          nodes { id status alt mediaContentType ... on MediaImage { image { url width height } } }
+        }
+      }
+    }`,
+        { id: productId },
+    );
+    return data?.product?.media?.nodes ?? [];
+}
+
+// How long to wait for Shopify to finish processing an image before calling it a failure.
+const MEDIA_POLL_MS = 1000;
+const MEDIA_ATTEMPTS = 20;
+
+// Processing is asynchronous: a mutation returns as soon as the file is accepted, and `status`
+// moves UPLOADED/PROCESSING -> READY (or FAILED). Reporting success before READY would claim an
+// image the store has not actually published. Exported because a media that is already attached
+// has to be waited for as well — otherwise a second run adds a duplicate next to it.
+export async function waitForMedia(store, productId, mediaId) {
+    for (let attempt = 0; attempt < MEDIA_ATTEMPTS; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, MEDIA_POLL_MS));
+        const node = (await productMedia(store, productId)).find((candidate) => candidate.id === mediaId);
+        if (node?.status === 'READY') return node;
+        if (node?.status === 'FAILED') {
+            throw new Error(`${store.key}: media ${mediaId} failed processing`);
+        }
+    }
+    throw new Error(`${store.key}: media ${mediaId} was still not READY after ${MEDIA_ATTEMPTS}s`);
+}
+
+// Attaching an image is three calls, because the bytes are ours and not a public URL: create a
+// staged upload target, POST the file to it, then point the product at the staged resource.
+// `productCreateMedia` no longer exists in API version 2026-07 — the `media` argument of
+// `productUpdate` replaced it. Two argument details came from the API itself, not the schema dump:
+// the product has to be named in `product` (an `identifier`-only call is rejected with "must
+// include exactly one of the following arguments: input, product"), and `product` is optional in
+// the schema but not for a media-only update. See task.md T-5.3.
+export async function addProductImage(store, productId, { filename, bytes, contentType, alt }) {
+    const staged = (
+        await adminGraphql(
+            store,
+            `mutation ($input: [StagedUploadInput!]!) {
+        stagedUploadsCreate(input: $input) {
+          stagedTargets { url resourceUrl parameters { name value } }
+          userErrors { field message }
+        }
+      }`,
+            {
+                input: [
+                    { resource: 'IMAGE', filename, mimeType: contentType, fileSize: String(bytes.length), httpMethod: 'POST' },
+                ],
+            },
+        )
+    ).stagedUploadsCreate;
+
+    if (staged.userErrors?.length) {
+        throw new Error(`${store.key}: staged upload rejected: ${JSON.stringify(staged.userErrors).slice(0, 300)}`);
+    }
+    const target = staged.stagedTargets?.[0];
+    if (!target) throw new Error(`${store.key}: staged upload returned no target`);
+
+    // The parameters are the bucket's signed fields and have to be sent exactly as given, followed
+    // by the file. FormData sets its own multipart boundary, so no Content-Type header here.
+    const form = new FormData();
+    for (const { name, value } of target.parameters) form.append(name, value);
+    form.append('file', new Blob([bytes], { type: contentType }), filename);
+
+    const upload = await fetch(target.url, { method: 'POST', body: form });
+    if (!upload.ok) {
+        throw new Error(`${store.key}: staged upload failed: HTTP ${upload.status} ${(await upload.text()).slice(0, 200)}`);
+    }
+
+    const updated = (
+        await adminGraphql(
+            store,
+            `mutation ($productId: ID!, $media: [CreateMediaInput!]!) {
+        productUpdate(product: { id: $productId }, media: $media) {
+          product { media(first: 20) { nodes { id status alt } } }
+          userErrors { field message }
+        }
+      }`,
+            { productId, media: [{ originalSource: target.resourceUrl, alt, mediaContentType: 'IMAGE' }] },
+        )
+    ).productUpdate;
+
+    if (updated.userErrors?.length) {
+        throw new Error(`${store.key}: media rejected for ${productId}: ${JSON.stringify(updated.userErrors).slice(0, 300)}`);
+    }
+
+    const nodes = updated.product?.media?.nodes ?? [];
+    const created = nodes.find((node) => node.alt === alt);
+    if (!created) throw new Error(`${store.key}: product ${productId} did not report the new media`);
+
+    return waitForMedia(store, productId, created.id);
+}

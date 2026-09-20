@@ -144,6 +144,42 @@ docker rm -f $(docker ps -q --filter name=price-sync-shopify)
   browser. Compose sets both for you. Deployed, the **binding** supplies `API_URL` and
   `NEXT_PUBLIC_API_URL` is deliberately left unset, so the browser uses relative paths.
 
+## Product images
+
+Every product in both stores carries one image, and it comes from the database rather than from the
+internet at sync time:
+
+```
+Openverse (free, keyless, commercial-use licences)   searched by the product's name
+        │
+        ▼
+Supabase `product_images`   the bytes, plus the licence, creator and source page
+        │
+        ▼
+Shopify staged upload → productUpdate(media:)   → both stores, image READY
+```
+
+```bash
+node backend/scripts/sync-images.js               # fetch what is missing, then sync both stores
+node backend/scripts/sync-images.js --self-check  # offline: the search-term and matching rules
+```
+
+It is re-runnable by design: an image is fetched once and afterwards read from `product_images`, and
+a store already carrying it (matched on the alt text, which is the product name) is left alone — so
+a second run is a verification pass, printing one line per store and SKU.
+
+**Choosing the image.** The search term is derived from the product name (the last two words, minus
+brand adjectives, numbers and trailing words like "Set"), because a name is a description rather
+than a query. A few names have no photograph of the object under any derived term — "Coasters" finds
+roller coasters, "Field Notebook" finds people writing in one — so the script carries a short phrase
+map for exactly those, and the photo chosen under a phrase still has to mention it. Candidates are
+ranked by whole-word matches against the title and the photographer's tags, with the shortest title
+that names the object winning; artwork, diagrams and unusably small files are dropped first.
+
+**Why the bytes are stored.** Shopify's staged upload takes a file rather than a link, and
+re-running the sync must not repeat the search. The row keeps the licence, the creator and the
+source page, which is what makes a CC BY / BY-SA image publishable.
+
 ## Environment variables
 
 `backend/.env` (git-ignored, from `backend/.env.example`) is the local source of the ten server-side
@@ -187,6 +223,12 @@ names are the standard libpq contract, so `psql`, `pg_dump` and node-postgres re
 - **The Dev Dashboard app grants far more scopes than it needs** (~102, against the two the plan
   asks for). Narrowing it needs a new app version *and* approval of the change on each store —
   Shopify does not apply released scopes to an existing install — so it is a manual console step.
+- **The product images come from a keyless Creative Commons index**, so they are *object-appropriate*
+  rather than product photography: a licensed image source, or a per-SKU asset, is what a real
+  catalogue would use. An anonymous Openverse client is also limited to 20 requests a minute and 200
+  a day, which is why the bytes are stored once and never re-searched. `SKU-006`'s image is the
+  loosest fit of the ten (a desk with a pull-out tray), and `backend/scripts/sync-images.js` holds
+  the phrase map for the names the derived terms get wrong.
 - **The deployment depends on Vercel Services**, which is a beta feature. The two-project fallback
   (a project per app, with `NEXT_PUBLIC_API_URL` pointing at the backend) is why
   `backend/vercel.json` and `backend/api/index.js` still exist; under the `services` config the
