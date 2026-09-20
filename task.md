@@ -30,11 +30,11 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 |---|---|---|---|
 | 0 — Environment & Store Preparation | 14 | 14 / 14 | complete |
 | 1 — Central Backend Service Development | 18 | 18 / 18 | complete |
-| 2 — Frontend Dashboard Development | 8 | 0 / 8 | not started |
+| 2 — Frontend Dashboard Development | 8 | 1 / 8 | in progress |
 | 3 — Deployment | 7 | 0 / 7 | not started |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 32 / 53 done
+**Overall:** 33 / 53 done
 
 ## Environment variables
 
@@ -532,7 +532,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 
 ## Phase 2 — Frontend Dashboard Development
 
-### [ ] T-2.1 — Scaffold the Next.js frontend with Tailwind
+### [x] T-2.1 — Scaffold the Next.js frontend with Tailwind
 
 - **Depends on:** `T-1.18`
 - **Size:** `M`
@@ -542,7 +542,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `frontend/` (Next.js scaffold files)
 - **Done when:** the dev server serves a page locally.
 - **Verify:** `cd frontend && npm run dev`, then `curl -s -o /dev/null -w '%{http_code}' localhost:3001/` → `200`.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `Do` step 1 run as the official scaffolder rather than by hand: `npx create-next-app@latest frontend --ts --tailwind --eslint --app --empty --use-npm --disable-git --no-agents-md --yes` → `Success! Created frontend at …/frontend`, `added 365 packages`, `found 0 vulnerabilities`. App Router + TypeScript + **Tailwind v4** (`@tailwindcss/postcss`, `app/globals.css` is the single line `@import "tailwindcss"`), and **no library beyond that**: deps are exactly `next@16.3.5`, `react@19.2.8`, `react-dom@19.2.8`, devdeps are the four `@types/*`/`tailwindcss`/`postcss`/`eslint*`/`typescript` entries. `--empty` was used so the page is a placeholder (`<main><div>Hello world!</div></main>`) instead of create-next-app's demo CSS and images — T-2.3 owns the real page, so there is nothing to delete later. `Verify` → **`200`**, from a real socket: `next dev -p 3001` logged `Ready in 356ms`, `curl -s -o /dev/null -w '%{http_code}' localhost:3001/` → `200`, and `curl -s localhost:3001/` returned a full HTML document whose `<link rel="stylesheet">` resolves to a Tailwind chunk (`/_next/static/chunks/app_globals_0yg4wg8.css` → `@layer theme { :root, :host { --font-sans: …`), so the styling base is live and not just declared. **Two deliberate deviations, both named:** (1) the `dev` script is `next dev -p 3001`, not the scaffolder's bare `next dev` — the default is port 3000, which the backend already occupies, and the `Verify` line and `docker-compose.yml`'s frontend service both specify 3001; the script is the one place that makes `npm run dev` mean the port the task asks for (`start` was left alone: Vercel supplies its own port and no task runs it locally). (2) `create-next-app` **refuses a non-empty target directory** (`The directory frontend contains files that could conflict: .dockerignore, Dockerfile`), so the two files this repo already had were moved aside for the scaffold and restored afterwards — both are tracked and `git status` shows them unmodified. `agentRules: false` was added to `frontend/next.config.ts`, with a comment: Next 16 regenerates `frontend/AGENTS.md` + `frontend/CLAUDE.md` on every dev start (it printed so on the first run), and they are not part of this project; after the change a fresh `next dev` starts with no such line and neither file exists. Confirmed also that `node_modules/`, `.next/` and `next-env.d.ts` stay untracked via the scaffold's own `frontend/.gitignore`.
 - **Blocks:** `T-2.2`, `T-2.3`
 
 ### [ ] T-2.2 — Add the API client module and `NEXT_PUBLIC_API_URL`
