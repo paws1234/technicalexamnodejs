@@ -28,13 +28,13 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 
 | Phase | Tasks | Done / Total | Status |
 |---|---|---|---|
-| 0 — Environment & Store Preparation | 14 | 9 / 14 | in progress |
+| 0 — Environment & Store Preparation | 14 | 10 / 14 | in progress |
 | 1 — Central Backend Service Development | 18 | 0 / 18 | not started |
 | 2 — Frontend Dashboard Development | 8 | 0 / 8 | not started |
 | 3 — Deployment | 7 | 0 / 7 | not started |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 9 / 53 done
+**Overall:** 10 / 53 done
 
 ## Environment variables
 
@@ -49,10 +49,22 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | `SHOPIFY_API_VERSION` | backend | pinned Admin API version string | local `backend/.env`, Vercel (backend) |
 | `ALLOWED_ORIGIN` | backend | deployed frontend URL from T-3.5 | local `backend/.env`, Vercel (backend) |
 | `PORT` | backend | local only | `backend/.env` |
+| `PGHOST` | database access (psql/`pg`) | Supabase → Project Settings → Database → Connection pooling, host `aws-<n>-<region>.pooler.supabase.com` | local `backend/.env` |
+| `PGPORT` | database access (psql/`pg`) | pooler **session** mode → `5432` | local `backend/.env` |
+| `PGDATABASE` | database access (psql/`pg`) | fixed `postgres` | local `backend/.env` |
+| `PGUSER` | database access (psql/`pg`) | `postgres.<project-ref>` — the pooler's username form | local `backend/.env` |
+| `PGPASSWORD` | database access (psql/`pg`) | Supabase → Project Settings → Database → password (secret) | local `backend/.env` |
+| `PGSSLMODE` | database access (psql/`pg`) | `require` — the pooler refuses unencrypted connections | local `backend/.env` |
 | `NEXT_PUBLIC_API_URL` | frontend | T-3.3 deployed backend URL | local `frontend/.env.local`, Vercel (frontend) |
 
+The `PG*` names are the standard libpq contract: `psql`, `pg_dump` and node-postgres read them
+from the environment with no glue code, so the database connection needs one secret, not four
+values. The owner chose this route for the database, so they are the project's credential; the
+tasks that still read `/rest/v1/` are named in T-0.10's evidence for restatement.
+
 `SUPABASE_SERVICE_ROLE_KEY` and `SHOPIFY_CLIENT_SECRET` are server-only — they must never appear
-in a `NEXT_PUBLIC_*` variable or in client-side code. The Admin API token itself is never stored:
+in a `NEXT_PUBLIC_*` variable or in client-side code. `PGPASSWORD` is server-only for the same
+reason. The Admin API token itself is never stored:
 it is minted per store at runtime and cached until it expires (T-1.5).
 
 ## Open questions / assumptions
@@ -197,18 +209,23 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** 2026-09-20 — **verified**. `Do` steps 1–2 run exactly as the `Verify` command writes them (`. backend/.env`, `TOKEN=$(node backend/scripts/shopify-token.mjs alpha --print)`, then the Admin API POST) → **HTTP 200** and `{"data":{"productVariants":{"edges":[{"node":{"id":"gid://shopify/ProductVariant/50472597455098","price":"19.99"}}]}}}`, i.e. exactly one node, non-empty `id`, and `price` `19.99` = the seeded price for `SKU-001` in `backend/seed/products.json` (and the same variant id T-0.4 created, so lookup and seeding agree). **Shape T-1.5 reuses:** `productVariants(first: 1, query: "sku:SKU-001") { edges { node { id price } } }` — `id` is a `gid://shopify/ProductVariant/<numeric>` GID string and `price` comes back as a **string** (`"19.99"`), so the sync has to parse it before comparing against the `numeric(10,2)` central price. Query cost 3 of 4000 available. Alpha only, as the task specifies; T-1.5's own `Verify` covers both stores. Throwaway request — no file left behind, per this task's artifacts line.
 - **Blocks:** `T-1.5`, `T-1.6`
 
-### [ ] T-0.10 — Create the Supabase project and capture the URL + service-role key
+### [x] T-0.10 — Create the Supabase project and make it reachable from this repo
 
 - **Depends on:** `T-0.1`
 - **Size:** `S`
 - **Why:** §3.1.4 — the central store of truth does not exist yet.
 - **Do:**
-  1. Create a free Supabase project, note the project URL and the service-role (secret) key.
-  2. Fill `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` into `backend/.env`.
+  1. Create a free Supabase project, note its project ref / URL.
+  2. Put its credential in `backend/.env` — on the chosen route that is the **database password** for the shared pooler (see the revision note), not a service-role key.
+
+  **Revised 2026-09-20 (owner decision, superseding the plan's wording):** the original text asked for "URL + service-role key", which assumes the app reads Supabase through PostgREST. The owner supplied the project's **pooler** connection string and chose the database route, where the **password alone** reaches the same database, so that is the credential this task closes on. `SUPABASE_URL` was captured too, because it falls out of the project ref for free and keeps the REST route open. Deliberately **not** done here: restating the tasks that still read `/rest/v1/`. Those are named in the evidence below and are a separate pass; this task's own requirement — the project is live and reachable with the credential in `backend/.env` — is met without them.
 - **Files / artifacts:** `backend/.env` (edit)
-- **Done when:** the project is live and the backend `.env` has both values.
-- **Verify:** `curl -s -o /dev/null -w '%{http_code}' "$SUPABASE_URL/rest/v1/" -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY"` → `200`.
-- **Evidence:** `-`
+- **Done when:** the project is live and reachable from this repo with the credential in `backend/.env`.
+- **Verify:** `timeout 120 docker run --rm --env-file backend/.env postgres:16 psql -w -c 'select current_user, current_database()'` → prints `postgres | postgres` and exits 0. It reads the file's own values, so a wrong host, port, database, user or password fails it. Corroboration that `SUPABASE_URL` is the same project: `curl -s -o /dev/null -w '%{http_code}' "$SUPABASE_URL/rest/v1/"` → `401` (a live project answering an unauthenticated request).
+- **Evidence:** 2026-09-20 — **project identified, proved live, and reachable.** The project exists: the pooler connection string the user supplied (`postgres.xnablaneqqhvmuddqroq@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres`) carries the project ref in its username, and the REST hostname is always `https://<project-ref>.supabase.co`, so `SUPABASE_URL` was **derived, not guessed**, and then proved live: `curl -s -o /dev/null -w '%{http_code}' https://xnablaneqqhvmuddqroq.supabase.co/rest/v1/` → **401** `{"message":"No API key found in request","hint":"No 'apikey' request header or url param was found."}` — a real project rejecting an unauthenticated call, not a 404. Control `nosuchprojectref000000.supabase.co` fails DNS entirely (`000`, no response body), so the 401 discriminates. Host is IPv4-only (`172.64.149.246`, `104.18.38.10`), so containers and Vercel can reach it. `backend/.env` now holds that URL, and `SUPABASE_SERVICE_ROLE_KEY` is still blank — on the route this task closed on, nothing needs it. The `Verify` the plan originally wrote (an `apikey` header turning that 401 into a 200) is the REST route, which the decision below supersedes: the DB password is a Postgres wire credential rather than an API key, so it reaches the same database, just not through `/rest/v1/`. A new `SUPABASE_DB_*` name was initially declined — it would break T-0.8's verified "exactly the 9 named variables" contract and T-1.2's "reads exactly the names in `.env.example`". The owner then directed it be added, and it went in as the standard `PG*` names below; T-0.8's check was re-run afterwards and still passes, with all 9 original names present. The pooler host does resolve to IPv4 from here (`54.64.190.72`, `35.79.125.133`, `52.68.3.1`), so that route stays open for those tasks if they are run from the repo instead of the SQL editor.
+- **Database config added (owner-directed, 2026-09-20):** the pooler parameters are now in `backend/.env`, templated in `backend/.env.example`, under the standard libpq names `PGHOST`/`PGPORT`/`PGDATABASE`/`PGUSER`/`PGPASSWORD`/`PGSSLMODE` — **every value fixed except `PGPASSWORD`, which is the only thing left to fill in.** No code consumes them yet and none is needed: `psql`, `pg_dump` and node-postgres 8.23.0 (`lib/connection-parameters.js`: `process.env['PG' + key.toUpperCase()]`, and `PGSSLMODE` → SSL) all read that contract straight from the environment. Proved **without** the real password by sending a deliberately wrong one: `docker run --rm -e PGUSER=postgres.xnablaneqqhvmuddqroq -e PGPASSWORD=<wrong> -e PGSSLMODE=require postgres:16 psql -w -c 'select 1'` → `FATAL: password authentication failed for user "postgres"`, i.e. the pooler routed to the right tenant and accepted host/port/database/user/TLS, rejecting only the secret. Control: the same probe with `PGUSER=postgres` (no project ref) → `FATAL: (ENOIDENTIFIER) no tenant identifier provided`, so the `<ref>`-bearing username is required and the two outcomes discriminate. The pooler resolves over IPv4 here (`52.68.3.1`, `54.64.190.72`, `35.79.125.133`), so this works from containers too, unlike `db.<ref>.supabase.co`.
+- **Decision taken 2026-09-20 (owner):** the database is reached over the pooler, so the `PG*` values are the project's credential and `SUPABASE_SERVICE_ROLE_KEY` is **not required** — not for this task, and not for Phase 0. Consequences to carry forward, named so the next run does not rediscover them: the `Verify` steps of T-0.11, T-0.12, T-0.13, T-0.14, T-1.3, T-1.9, T-1.13, T-1.14, T-1.15, T-1.17, T-3.4 and T-4.3 still curl `/rest/v1/`, and the data layer named in T-1.1/T-1.3/T-1.9 is still `@supabase/supabase-js` (REST only) rather than `pg` over the pooler; T-3.3's Vercel variable list follows from whichever wins. Those edits are a separate pass and were deliberately not made here.
+- **Verified 2026-09-20:** the owner filled `PGPASSWORD`, and the restated `Verify` ran green — `docker run --rm --env-file backend/.env postgres:16 psql -w -c 'select current_user, current_database()'` → `postgres | postgres`, **exit 0**, server `PostgreSQL 17.6`; `SUPABASE_URL` from the file answers `401` at `/rest/v1/`, so it is the same live project. The same credential reports the cloud project's `public` schema as holding **0 tables**, i.e. T-0.11–T-0.13 have not been applied there yet. The password's value was never read into the transcript — only its length was measured (`awk -F= '/^PGPASSWORD=/{print length($2)}'` → `16`).
 - **Blocks:** `T-0.11`, `T-0.12`, `T-0.13`, `T-1.3`
 
 ### [ ] T-0.11 — Create the `products` table
