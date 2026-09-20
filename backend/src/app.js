@@ -90,3 +90,10 @@ app.use((err, req, res, next) => {
   // internals to whoever is calling.
   res.status(status).json({ error: status < 500 ? err.message : 'Internal server error' });
 });
+
+// Vercel's Express builder treats `src/app.js` as the service entry — it is checked before
+// `src/server.js` — and the detected entry has to default-export the app or listen, which this
+// file deliberately does neither of. Without this line every deployed request answers 500
+// "Invalid export found … The default export must be a function or server" (found at T-3.3);
+// the named export above stays, because server.js and api/index.js import it.
+export default app;
