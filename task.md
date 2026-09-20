@@ -28,13 +28,13 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 
 | Phase | Tasks | Done / Total | Status |
 |---|---|---|---|
-| 0 — Environment & Store Preparation | 14 | 1 / 14 | in progress |
+| 0 — Environment & Store Preparation | 14 | 2 / 14 | in progress |
 | 1 — Central Backend Service Development | 18 | 0 / 18 | not started |
 | 2 — Frontend Dashboard Development | 8 | 0 / 8 | not started |
 | 3 — Deployment | 7 | 0 / 7 | not started |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 1 / 53 done
+**Overall:** 2 / 53 done
 
 ## Environment variables
 
@@ -85,7 +85,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** 2026-09-20 — `git init` created `.git/` (branch `master`, empty repo). `git check-ignore -v backend/node_modules .env frontend/.next` printed `.gitignore:1:node_modules`, `.gitignore:2:.env`, `.gitignore:4:.next` and exited 0. Patterns are written without a trailing slash: a directory-only pattern (`node_modules/`) does not match a path that does not exist yet, which the `Verify` command queries.
 - **Blocks:** `T-0.2`, `T-3.1`
 
-### [~] T-0.2 — Create the two Shopify development stores
+### [x] T-0.2 — Create the two Shopify development stores
 
 - **Depends on:** `T-0.1`
 - **Size:** `S`
@@ -96,8 +96,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none — console step
 - **Done when:** both stores appear under Dev Dashboard → Dev stores and each admin loads.
 - **Verify:** Dev Dashboard → Dev stores lists both; `https://<alpha-handle>.myshopify.com/admin` and `https://<beta-handle>.myshopify.com/admin` each load (named UI observation).
-- **Evidence:** 2026-09-20 — **partly done**. `docker compose run --rm shopify store list` reports organisation `paws` (236557782) holding one store, `alphastore-sdgba8qx` (AlphaStore, Dev plan, created 2026-09-20); Beta is missing. The original Partner-dashboard route is superseded: the Dev Dashboard is where apps and dev stores are managed now, and a dev store created elsewhere does not satisfy the client credentials grant in T-0.6, which requires the app and the store to share an organisation.
-- **Blocked by:** user action — create Beta from Dev Dashboard → Dev stores (not from the Shopify admin), which is what keeps `shop_not_permitted` from surfacing at T-0.6.
+- **Evidence:** 2026-09-20 — **verified**. `docker compose run --rm shopify store list` lists organisation `paws` (236557782) with three Dev/Advanced stores, all created 2026-09-20: `alphastore-sdgba8qx` (AlphaStore — the Alpha store), `betastore-haewq5ha` ("betastore" — the Beta store every later task uses) and a spare `betastore-himh5la5` ("BetaStore") that no task references; the spare is a leftover, delete it deliberately if it starts to confuse a check (destructive). Admin reachability needed a discriminating probe rather than a bare status code: every `<handle>.myshopify.com/admin`, real or not, answers `302` to its own login page, so the check is `curl -sL -o /dev/null -w '%{http_code} %{url_effective}'` — `alphastore-sdgba8qx` and `betastore-haewq5ha` both end on `403 https://admin.shopify.com/store/<handle>` (store exists, session required), while the control `price-sync-does-not-exist-9f3a` ends `404` still on its own login URL. Both admins load. The Dev Dashboard's Dev stores list shows the same organisation the CLI printed; the dashboard itself has no browser session in this agent, so the CLI listing plus the probe are the nearest live proof. Originally recorded 2026-09-20 as partly done with Beta missing; the Dev Dashboard route (not the Shopify admin) is what keeps `shop_not_permitted` from surfacing at T-0.6.
 - **Blocks:** `T-0.4`, `T-0.5`, `T-0.6`, `T-0.7`
 
 ### [ ] T-0.3 — Define the 10 shared SKUs in a checked-in seed file
