@@ -1,6 +1,6 @@
 # Task Breakdown — Centralized Price Sync (Task 3)
 
-> Source: `plan.md` · Generated: 2026-09-20 · Status: in progress
+> Source: `plan.md` · Generated: 2026-09-20 · Status: complete
 
 ## How to use this file
 
@@ -32,9 +32,9 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | 1 — Central Backend Service Development | 18 | 18 / 18 | complete |
 | 2 — Frontend Dashboard Development | 9 | 9 / 9 | complete |
 | 3 — Deployment | 7 | 7 / 7 | complete |
-| 4 — End-to-end acceptance | 6 | 4 / 6 | in progress |
+| 4 — End-to-end acceptance | 6 | 6 / 6 | complete |
 
-**Overall:** 52 / 54 done
+**Overall:** 54 / 54 done
 
 ## Environment variables
 
@@ -772,7 +772,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** 2026-09-20 — **verified**, driven from the **real browser on the deployed dashboard** (`https://technicalexamnodejs.vercel.app/`), not by calling the API directly. SKU chosen: `SKU-005` ("Ceramic Pour-Over Set"), the one SKU no earlier task had moved, so `45.00 → 47.50` is unambiguous. **Before:** psql read `SKU-005|45.00` and the deployed `/prices` row was `central_price 45.00`, both stores `synced` at `45.00`, `has_mismatch false`. **`Do` step 1 in the UI:** typed `47.50` into that row's price input and pressed its `Update` button — the page issued `REQ PATCH https://technicalexamnodejs.vercel.app/prices/SKU-005` → `RES 200`, so the request is the dashboard's own and it succeeded. **`Verify` first half:** the row's **central cell** (read as `children[1]`, so the typed input value cannot masquerade as the refreshed one) read `Central45.00` before and `Central47.50` **3.5s** after the submit, which is T-2.6's refresh landing — the two store cells stayed `synced`. Console capture during the whole interaction: **zero** messages. **`Verify` second half, an independent read rather than the API's own answer:** `select sku, price, updated_at from products where sku='SKU-005'` → `SKU-005|47.50|2026-09-20 12:02:55.015172+00`, i.e. the new value **persisted** with a fresh `updated_at`. The propagation is visible in the same read: `store_sync_status` holds `alpha | synced | 47.50` and `beta | synced | 47.50`, and the deployed `/prices` row reads `central_price 47.50`, both stores `synced`, `has_mismatch false`. **Data consequence for every task after this one:** `SKU-005` is no longer `45.00` — the seed value in `backend/seed/products.json` no longer describes the live row, so anything quoting the seed for `SKU-005` must re-read it.
 - **Blocks:** `T-4.2`, `T-4.6`
 
-### [ ] T-4.2 — Confirm both Shopify admin panels show the new price
+### [x] T-4.2 — Confirm both Shopify admin panels show the new price
 
 - **Depends on:** `T-4.1`
 - **Size:** `S`
@@ -782,7 +782,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none
 - **Done when:** both admins show the new value for that SKU.
 - **Verify:** Alpha and Beta admin → that variant's price equals the T-4.1 value (named UI observation, both stores); independently `findVariantBySku` returns the same price for both.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified, with this `Verify`'s two halves held to different standards and labelled as such.** The admin half was performed by the owner, not by this agent: asked to open the `SKU-005` variant (*Ceramic Pour-Over Set*) in both panels and confirm the price, the owner answered *"yes its 47.50"*. No agent-side admin observation was possible, and that limitation is **measured rather than assumed** — `https://admin.shopify.com/store/alphastore-sdgba8qx/products` opened in the agent's browser lands on `accounts.shopify.com/lookup` (Shopify's log-in wall), and signing in would mean handling the owner's credentials. The second half — "independently `findVariantBySku` returns the same price for both" — was measured here, and it is the substantive one: `alpha alphastore-sdgba8qx.myshopify.com {"variantId":"gid://shopify/ProductVariant/50472598372602",…,"price":"47.50"}` and `beta betastore-haewq5ha.myshopify.com {"variantId":"gid://shopify/ProductVariant/46218660872291",…,"price":"47.50"}`, equal to `products.price` `SKU-005=47.50` read in the same pass — so both stores genuinely hold the T-4.1 value, which is what the `Done when` line asserts; the admin panel only displays it. A second path agrees in the same run: `node backend/scripts/refresh-status.js` re-read both stores through the app credential and reported `20 rows in store_sync_status for 10 SKUs × 2 stores, 0 failed`, so no store held anything but its central price. **Attribution caveat, stated rather than smoothed:** the owner's confirmation is one report, asked in terms of both admins, not two separately-worded observations, so "each panel displayed it" rests on a single statement — while the store-level fact both halves test is proven independently of the admin UI, which is why this is recorded verified rather than left open.
 - **Blocks:** `T-4.6`
 
 ### [x] T-4.3 — Confirm the read endpoint reports no mismatch for both stores
@@ -825,7 +825,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** 2026-09-20 — **verified**. `Do` step 1's credential restore was the closing half of T-4.4 (real value re-added to the Vercel project from `backend/.env`, 12 names, redeployed), so this task's own work is the re-submit and the read-back. **Re-submit from the dashboard, same SKU and same price** (`SKU-006` at `41.00`, which is the central price T-4.4 left behind — the recovery is "does Beta now take the price it refused", not a new price), in the deployed browser: the row's badges were `[synced, failed]` **before** the submit and `[synced, synced]` after, both on the green `lab(96.19 …)` background with `title` null, and the PATCH body came back `{"sku":"SKU-006","price":"41.00","stores":[{"store":"alpha","status":"synced","error":null},{"store":"beta","status":"synced","error":null}]}` with **no** inline message (nothing left to report). Console capture: zero messages. **`Verify`:** the deployed `/prices` row → `{"central_price":"41.00","statuses":["synced","synced"],"has_mismatch":false}`, and the whole board is clean again — `flagged across all 10 SKUs = 0`. **The status cleared rather than being overwritten with a stale value:** `select … from products p left join store_sync_status s using (sku) where p.sku='SKU-006'` → `alpha | synced | 41.00 | 2026-09-20 12:06:33.613727+00 | (no error)` and `beta | synced | 41.00 | 2026-09-20 12:06:34.377178+00 | (no error)`, i.e. Beta's `error` text from T-4.4 is gone and `live_price` moved from `null` to `41.00`. `Done when` holds at the store itself, not just in the log: Beta read live through the Admin API (real domain, app credential) → `beta live price = 41.00`, equal to central, with Alpha at the same value. The failed→synced transition therefore round-trips, which is the claim T-4.4 could not make on its own.
 - **Blocks:** `T-4.6`
 
-### [ ] T-4.6 — Rehearsal — one clean run-through of the whole demo
+### [x] T-4.6 — Rehearsal — one clean run-through of the whole demo
 
 - **Depends on:** `T-4.1`, `T-4.2`, `T-4.3`, `T-4.4`, `T-4.5`, `T-3.7`
 - **Size:** `M`
@@ -836,5 +836,5 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none (optionally a scripted checklist section in `README.md`)
 - **Done when:** the sequence completes unaided, with the failure case and recovery both demonstrated.
 - **Verify:** the run covers success, mismatch flagging, and recovery within the demo time box; every value shown matches what the API and the admins report (named observation across dashboard, Supabase, and both stores).
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified.** The sequence ran end to end on the **deployed** system today, in three phases, with this line labelling who observed what. **Success:** the owner ran the dashboard half — `SKU-009` (*Linen Apron*) changed from `52.00` to `54.25` and submitted; the database timestamps the sync (`store_sync_status … 12:46:13.958` and `12:46:14.760`) and both stores read back `54.25`, so the change is real rather than a UI echo. **Mismatch flagging:** injected by the agent, the only party that reaches the Vercel CLI — Beta's credential pointed at a non-existent store plus `vercel deploy --prod --yes` (12 names), then the same row submitted again **at the price it already held**, so no live price moved: the response was `200` with `alpha synced` / `beta failed … HTTP 404 …`, the UI showed Store A green and Store B **red `failed`** (`lab(92.24 10.29 …)` against the green `lab(96.19 -13.85 …)`) carrying the error in its `title` and T-2.7's inline `beta: …` message, `/prices` flagged **1** with `has_mismatch true`, and `products.price` still read `SKU-009=54.25` — the central write survived a store failure. **Recovery:** credential restored, redeployed, the same row re-submitted → `200` both `synced`, badges back to green with no message, `/prices` flagged **0**, and `node backend/scripts/refresh-status.js` re-read both stores through Shopify to report `20 rows … 0 failed`, so the recovery is the stores' own answer rather than the API's claim read back. **Substitution, stated rather than glossed:** the `Verify` asks for a named observation "across dashboard, Supabase, and both stores", and no party looked at the Shopify admin panels during the ~25s failure window — that window is deliberately transient and cannot be revisited after the fact. The nearest live proof was taken instead, and for this particular claim it is stronger: both stores were read **directly** through the Admin API — Beta `54.25` **while the deployment reported it failed**, proving the failed store was genuinely left untouched, and both `54.25` after recovery. Alpha also has the CLI's independent store session; Beta still has no second credential path (the T-0.5 caveat), so its read rests on the app credential alone. **Timing and unplanned steps:** the three phases spanned `12:46 → 12:48 → 12:49`, roughly three minutes of wall clock including both redeploys, inside any demo time box. The only unplanned steps were operator-side rather than product-side: the failure case needs the Vercel CLI instead of the dashboard, and T-2.7's message appears only **with** the refresh (~3s), so a read taken the instant the button is clicked misses it. One benign console event recurs throughout — `?_rsc=… net::ERR_ABORTED`, Next.js's own prefetch after `router.refresh()` — and is not a failure. **End state:** 20 `store_sync_status` rows `synced`, `/prices` flagged `0`, `SKU-009` `54.25` in the central table and in both stores.
 - **Blocks:** none
