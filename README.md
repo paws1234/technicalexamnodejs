@@ -2,6 +2,44 @@
 
 Task 3 — Centralized price sync. `plan.md` is the architecture, `task.md` the task breakdown.
 
+## Deployed
+
+**https://technicalexamnodejs.vercel.app** — one URL, both apps:
+
+| Path | Served by |
+|---|---|
+| `/` | the Next.js dashboard |
+| `/health`, `/prices`, `/prices/:sku` | the Express API |
+
+Both live in **one Vercel project**, declared as two **Services** in the root `vercel.json`
+(`frontend/` and `backend/` keep their own roots and their own installs). The top-level `rewrites`
+send the three API paths to the `backend` service and everything else to `frontend/`; a service
+receives the **original** request path, so `/prices` arrives at Express unchanged and the routes
+need no prefix. The frontend declares one **binding** to the backend —
+`{ "type": "service", "service": "backend", "format": "url", "env": "API_URL" }` — so Vercel
+injects that URL into the frontend's server-side environment as `API_URL`. No API hostname is
+hard-coded, and the **browser** needs none: with `NEXT_PUBLIC_API_URL` unset in the project the
+dashboard calls the API on its own origin.
+
+## How it fits together
+
+```
+Shopify Store A ─┐                            ┌─ GET   /prices        catalogue + per-store state + has_mismatch
+                 ├── Express API (Vercel) ────┤
+Shopify Store B ─┘                            └─ PATCH /prices/:sku  central price, then both stores
+         ▲                  │
+         │                  ▼
+         │          Supabase Postgres ──────────── Next.js dashboard: the 10 SKUs, each store's last
+         └──────── (source of truth) ◀────────────  known price/status, and a per-row price editor
+```
+
+A `PATCH` runs in three steps: **A** write the central price, **B** look the variant up by SKU on
+each store and write the price there, **C** record the outcome per store. Each store is synced in
+its own `try`/`catch`, so one store failing is captured on its own `store_sync_status` row instead
+of failing the request — the response carries `{ sku, price, stores: [{ store, status, error }] }`
+and is a `502` only when *no* store took the price. The Admin API token is never stored: it is
+minted per store from one Dev Dashboard app's client id/secret and cached until it expires.
+
 ## Run it locally with Docker
 
 `docker compose up --build` needs nothing but Docker. Supabase + Vercel stay the deployment path
@@ -20,8 +58,16 @@ same contract `psql` and `pg_dump` use, so the app, a manual query and the seed 
 one credential and one connection profile. The pooler host resolves over IPv4, so the same values
 work from inside a container and from Vercel; no credential is baked into the compose file.
 
-**Today the `backend` and `frontend` services exit immediately** with `Could not read package.json`
-— the app code is T-1.1/T-2.1 and does not exist yet.
+Without Docker, the two apps run straight from their folders — this is the faster loop while working
+on either one:
+
+```bash
+(cd backend  && npm install && npm start)      # API on :3000, reads backend/.env
+(cd frontend && npm install && npm run dev)    # dashboard on :3001
+```
+
+`backend/.env` is git-ignored — copy `backend/.env.example` and fill it in from the table below.
+`frontend/.env.local` needs `NEXT_PUBLIC_API_URL=http://localhost:3000` for local dev only.
 
 ### The database
 
@@ -93,5 +139,56 @@ docker rm -f $(docker ps -q --filter name=price-sync-shopify)
   instead of as root; unset, they run as root.
 - Both app Dockerfiles add an IPv4 preference to `/etc/gai.conf`. Containers here have no IPv6
   route while DNS answers with AAAA records first, which makes `npm install` hang.
-- Server components must fetch `API_URL` (`http://backend:3000`); `NEXT_PUBLIC_API_URL`
-  (`http://localhost:3000`) is only correct in the browser. Set both in T-2.2.
+- Server components must fetch `API_URL` (`http://backend:3000` under Docker — a service name the
+  browser cannot resolve); `NEXT_PUBLIC_API_URL` (`http://localhost:3000`) is only correct in the
+  browser. Compose sets both for you. Deployed, the **binding** supplies `API_URL` and
+  `NEXT_PUBLIC_API_URL` is deliberately left unset, so the browser uses relative paths.
+
+## Environment variables
+
+`backend/.env` (git-ignored, from `backend/.env.example`) is the local source of the ten server-side
+names; the same ten are set in the Vercel project for Production and never in the repo. The `PG*`
+names are the standard libpq contract, so `psql`, `pg_dump` and node-postgres read one profile.
+
+| Name | Used by | Where it comes from | Set in |
+|---|---|---|---|
+| `SHOPIFY_ALPHA_STORE` | backend | Alpha's `<handle>.myshopify.com` | `backend/.env`, Vercel |
+| `SHOPIFY_BETA_STORE` | backend | Beta's `<handle>.myshopify.com` | `backend/.env`, Vercel |
+| `SHOPIFY_CLIENT_ID` | backend | Dev Dashboard app client id — one app, both stores | `backend/.env`, Vercel |
+| `SHOPIFY_CLIENT_SECRET` | backend | that app's client secret (secret) | `backend/.env`, Vercel |
+| `SHOPIFY_API_VERSION` | backend | pinned Admin API version, e.g. `2026-07` | `backend/.env`, Vercel |
+| `PGHOST` | backend, `psql` | Supabase → Project Settings → Database → Connection pooling, host `aws-<n>-<region>.pooler.supabase.com` | `backend/.env`, Vercel |
+| `PGPORT` | backend, `psql` | pooler **session** mode → `5432` | `backend/.env`, Vercel |
+| `PGDATABASE` | backend, `psql` | `postgres` | `backend/.env`, Vercel |
+| `PGUSER` | backend, `psql` | `postgres.<project-ref>` — the pooler's username form | `backend/.env`, Vercel |
+| `PGPASSWORD` | backend, `psql` | the project's database password (secret) | `backend/.env`, Vercel |
+| `PGSSLMODE` | backend, `psql` | `require` — the pooler refuses unencrypted connections | `backend/.env`, Vercel |
+| `ALLOWED_ORIGIN` | backend | the deployed dashboard origin (CORS) | `backend/.env`, Vercel |
+| `PORT` | backend | local only — the deployed entry never listens | `backend/.env` |
+| `SUPABASE_URL` | — unused | project URL; the REST route was not taken | `backend/.env` |
+| `SUPABASE_SERVICE_ROLE_KEY` | — unused | service-role key; blank and not required | `backend/.env` |
+| `NEXT_PUBLIC_API_URL` | frontend (browser) | API origin — required locally, **unset** in the single-deployment shape | `frontend/.env.local` |
+| `API_URL` | frontend (server fetches) | **not set by hand** — injected by Vercel from the service binding; `http://backend:3000` under Docker | Vercel binding, `docker-compose.yml` |
+
+`SHOPIFY_CLIENT_SECRET` and `PGPASSWORD` are server-only and must never appear in a
+`NEXT_PUBLIC_*` variable or in client-side code.
+
+## Known simplifications
+
+- **`PATCH /prices/:sku` is unauthenticated.** The plan specifies no auth and adding one unasked was
+  out of scope, so the route is publicly writable once deployed. Flagged, not fixed.
+- **Store state is written, never read live.** `GET /prices` compares the central price against the
+  *last known* store price in `store_sync_status`, which is written by `PATCH` and by
+  `node backend/scripts/refresh-status.js`. A price changed directly in a Shopify admin is therefore
+  only visible after the refresh script runs.
+- **`failed` and `mismatch` are distinct.** `failed` = the store could not be read or written at all;
+  `mismatch` = the store was read and its price differs from the central one.
+- **One currency, no rounding logic.** Every price is a 2-decimal `numeric(10,2)`.
+- **The Dev Dashboard app grants far more scopes than it needs** (~102, against the two the plan
+  asks for). Narrowing it needs a new app version *and* approval of the change on each store —
+  Shopify does not apply released scopes to an existing install — so it is a manual console step.
+- **The deployment depends on Vercel Services**, which is a beta feature. The two-project fallback
+  (a project per app, with `NEXT_PUBLIC_API_URL` pointing at the backend) is why
+  `backend/vercel.json` and `backend/api/index.js` still exist; under the `services` config the
+  Express app is detected from `backend/src/server.js` and `backend/api/index.js` is a redundant
+  second entry.

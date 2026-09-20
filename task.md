@@ -31,10 +31,10 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | 0 — Environment & Store Preparation | 14 | 14 / 14 | complete |
 | 1 — Central Backend Service Development | 18 | 18 / 18 | complete |
 | 2 — Frontend Dashboard Development | 9 | 9 / 9 | complete |
-| 3 — Deployment | 7 | 3 / 7 | in progress |
-| 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
+| 3 — Deployment | 7 | 7 / 7 | complete |
+| 4 — End-to-end acceptance | 6 | 4 / 6 | in progress |
 
-**Overall:** 44 / 54 done
+**Overall:** 52 / 54 done
 
 ## Environment variables
 
@@ -702,7 +702,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Repaired 2026-09-20 (owner: "fix it first") — `[x]` again, verified on the live alias.** The repair went into `backend/src/config.js`, **not** into the Vercel variables: `PORT` is now the one **optional** name (`const OPTIONAL = new Map([['PORT', '3000']])`), excluded from the missing-name throw and given a fallback when it is unset or empty, while every other name stays a startup error. That is the root cause rather than the symptom — the Env vars table marks `PORT` "local only", and the deployed entry never calls `listen` (this deploy's own log: `✓ Build complete — Using src/app.js as the root entrypoint`), so a deployment *cannot* supply a value the app has no use for, and pushing `PORT=3000` into the project would have papered over the contract instead of fixing it. Local proof of the deployment's exact condition: `env PORT= node -e "import('./backend/src/config.js')…"` → `loaded, config.port = "3000"`, i.e. the module that used to raise `Missing required environment variable(s): PORT` now loads, and the rest of T-1.2's contract is intact — still `13 keys: port,…,shopifyApiVersion`, and `env SHOPIFY_CLIENT_SECRET= …` still exits **1** naming `SHOPIFY_CLIENT_SECRET`. `localhost:3000/health` → **`200`** unchanged. Redeployed (`vercel deploy --prod --yes` → `Ready in 33s`, aliased to `https://technicalexamnodejs.vercel.app`, deployment `technicalexamnodejs-9or9hiaqx-…`), and the alias now answers this task's `Verify`: `/health` → **`200` `{"ok":true}`**. The `Done when` clause holds too — `/prices` → **10** rows, `flagged 0`, `SKU-001 … "central_price":"22.00"` with both stores `synced` from the real database, so the deployment reaches Supabase; `/` → **`200`**; and the input gate is live on the deployed API (`PATCH {"price":"abc"}` → **`400`**). **Durable half done in parallel by the owner:** while this repair was being verified the fix was committed and pushed as `d5fa4c0 "fixed deployment port things"` (the file now matches HEAD), and that push produced a **Git-triggered** Production deployment — the production alias moved to `technicalexamnodejs-rdor0m4xt-…` (created 19:54:35) instead of the CLI-built `technicalexamnodejs-9or9hiaqx-…`, and it answers the same way: `/health` → **`200`**, `/prices` → **10** rows, `flagged 0`. So the deployment is now healthy **from committed source** and no longer depends on a local-only edit — the exact exposure the failed re-check above was about. The CLI deploy left no side effects on the tree (no `.env*` re-appended to `.gitignore`, no root `.env.local`).
 - **Blocks:** `T-3.4`, `T-3.5`
 
-### [ ] T-3.4 — Verify the deployed routes
+### [x] T-3.4 — Verify the deployed routes
 
 - **Depends on:** `T-3.3`
 - **Size:** `S`
@@ -712,10 +712,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none
 - **Done when:** the deployed read route returns real database data.
 - **Verify:** `curl -s https://<project>.vercel.app/prices | jq 'length'` → `10`; `curl -s -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"price":"abc"}' https://<project>.vercel.app/prices/SKU-001` → `400`. **Restated 2026-09-20** from `https://<backend>.vercel.app/...`: the paths are unchanged — the top-level rewrites send `/prices` to the Express service and *"the service receives the original request path"* — only the host collapses from two to one.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified** against the production alias `https://technicalexamnodejs.vercel.app` (this task's `Verify` names `<project>`, and T-3.3's single Services project is the host that serves both paths). Command 1 → `length = 10`, and the first row read `{"sku":"SKU-001","central_price":"22.00","alpha":"synced","beta":"synced"}`, so the read route returns all ten SKUs with both store entries populated. Command 2 → `400`. `jq` is not installed on this host, so the length was taken by piping the same body through a one-line `node` parser — the identical assertion on the same response, not a weaker substitute; the PATCH gate is a bare `curl` status either way. The `Done when` line's "real database data" was checked rather than inferred: the ten `central_price` values returned by the **deployed** API (`SKU-001=22.00 … SKU-010=89.50`) are character-for-character what `docker run --rm --env-file backend/.env postgres:16 psql -w -t -A -c "select string_agg(sku||'='||price,' ' order by sku) from products"` returns from the cloud database, so the function is reading the same rows this repo reads and not a fixture or a cache. The rejected `abc` PATCH wrote nothing — it is refused by T-1.12's `PRICE_PATTERN` before any write.
 - **Blocks:** `T-3.5`, `T-4.1`
 
-### [ ] T-3.5 — Confirm the dashboard is served by that same deployment
+### [x] T-3.5 — Confirm the dashboard is served by that same deployment
 
 - **Depends on:** `T-3.3`, `T-3.1`
 - **Size:** `S`
@@ -725,10 +725,11 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none
 - **Done when:** the deployed dashboard loads live data from the same domain as the API.
 - **Verify:** `curl -s -o /dev/null -w '%{http_code}' https://<project>.vercel.app/` → `200`, and the page in a browser shows 10 rows with both store columns populated.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `Do` step 1 needed no deployment work: T-3.3's `services` config already puts the frontend on the project root, and both facts it asks to be confirmed were measured rather than assumed. Command 1 → `root=200`. The browser half was taken in a **real browser** on the deployed URL, not from the HTML alone: the page title is `Central Price Sync`, the heading and the 10-row list render `SKU-001`…`SKU-010` each with its central price and **both** store cells reading `synced` — 10 rows, 10 `Update` buttons and 20 status badges, with `SKU-001` `22.00` / `synced` / `synced` as the first row. The same 20 badges appear as 20 `>synced<` occurrences in the server-rendered HTML, so the data is arriving live from the deployed API rather than from a client-side placeholder. Cross-checked against the database: the ten rendered central prices are character-for-character the ten values T-3.4 read from the cloud `products` table.
+- **Same-origin, as the `Do` step words it:** `vercel env ls production | grep -c NEXT_PUBLIC_API_URL` → **`0`**, i.e. `NEXT_PUBLIC_API_URL` is **not** set in the project, so T-2.9's browser branch falls through to `PUBLIC_API_URL = ''` and the dashboard's `fetch` goes to a path on its own origin. The only `NEXT_PUBLIC_API_URL` in the tree is the local dev value in `frontend/.env.local` (`http://localhost:3000`), which is gitignored and therefore never reaches the Vercel build. `Done when` therefore holds: the deployed dashboard loads live data from the same domain as the API.
 - **Blocks:** `T-3.6`, `T-4.1`
 
-### [ ] T-3.6 — Confirm the CORS stance for a single-origin deployment
+### [x] T-3.6 — Confirm the CORS stance for a single-origin deployment
 
 - **Depends on:** `T-3.5`
 - **Size:** `S`
@@ -737,11 +738,11 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   1. Set `ALLOWED_ORIGIN` to the deployed URL in the project and redeploy, then confirm the deployed dashboard updates a row with nothing CORS-related in the console.
 - **Files / artifacts:** Vercel env var (dashboard) — the app already reads `config.allowedOrigin` from T-1.7
 - **Done when:** the same-origin deployment is explained rather than assumed, and local/dev CORS still works.
-- **Verify:** the deployed dashboard updates a row without a CORS error; `curl -s -D- -o /dev/null -H 'Origin: https://example.com' https://<project>.vercel.app/prices | grep -i access-control-allow-origin` → no matching header (still true, but now trivially so — the request is same-origin, which is weaker evidence than the original wording implied).
-- **Evidence:** `-`
+- **Verify:** the deployed dashboard updates a row without a CORS error; `curl -s -D- -o /dev/null -H 'Origin: https://example.com' https://<project>.vercel.app/prices | grep -i access-control-allow-origin` → no matching header (still true, but now trivially so — the request is same-origin, which is weaker evidence than the original wording implied). **Corrected 2026-09-20 after running it:** the second command does print a header. The expectation the original wording encodes (that a foreign caller gets nothing back) only holds for `cors({ origin: '*' })`-style configurations; with the **string** origin this app uses, the middleware sends `access-control-allow-origin: <the configured origin>` on *every* response, so the check that discriminates is whether the echoed value is the **caller's** origin — it never is. Measured behaviour is in Evidence.
+- **Evidence:** 2026-09-20 — **verified**; the deviation from the `Verify` line's prediction is recorded above and below rather than smoothed over. `Do` step 1 needed no redeploy: `ALLOWED_ORIGIN` is already the deployed URL in the project (set at T-3.3, visible as one of the 12 Production names; the CLI hides the value, and T-3.3's evidence records it as `https://technicalexamnodejs.vercel.app`). **Dashboard half, in a real browser on the deployed URL:** `SKU-001`'s row was re-submitted at its current price `22.00` — deliberately the **same** value, so this task proves the request path without moving a live store price — and the browser's own listener recorded exactly `REQ PATCH https://technicalexamnodejs.vercel.app/prices/SKU-001` → `RES 200`, i.e. **same origin as the page**, with the row re-rendering `22.00 | synced | synced`. Console capture returned **zero** messages and **zero** `pageerror` events: nothing CORS-related, and nothing else either. One unrelated event appeared in the browser's own log during the interaction — an aborted Next.js RSC prefetch (`GET /?_rsc=…` → `net::ERR_ABORTED`) — which is the client router re-requesting after T-2.6's refresh, not a CORS failure (a CORS refusal reads `blocked by CORS policy`), and the row it renders is correct. **Cross-origin half:** `curl -s -D- -o /dev/null -H 'Origin: https://example.com' https://technicalexamnodejs.vercel.app/prices` → the response carries `access-control-allow-origin: https://technicalexamnodejs.vercel.app`, **not** `*` and **not** the caller's `https://example.com`. So a browser on `example.com` fails its own CORS check (a mismatch between the request origin and the echoed value is a denial), which is what the task is asking to be true; the shape just differs from the literal `grep` the `Verify` line predicted. **Local/dev CORS still works, which is the other half of `Done when`:** against the local backend, `curl -s -D- -o /dev/null -H 'Origin: http://localhost:3001' localhost:3000/prices` → `Access-Control-Allow-Origin: http://localhost:3001` (`local-health=200`), so the middleware is still the thing serving Phase 2's two-port dev setup. No code was changed by this task — the observed behaviour is the `cors` package's standard string-origin handling, and narrowing it to satisfy the mis-written grep would have been a change with no security benefit.
 - **Blocks:** `T-4.1`
 
-### [ ] T-3.7 — Write the README
+### [x] T-3.7 — Write the README
 
 - **Depends on:** `T-3.4`, `T-3.5`
 - **Size:** `M`
@@ -751,14 +752,14 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `README.md`
 - **Done when:** a reader can run both apps and understand the sync flow from the README alone.
 - **Verify:** the README lists every variable in the Env vars table (`grep -c` matches) and the deployed URL resolves — **one** URL since T-3.3's revision, with the `services` config and the binding explained rather than left as magic.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**; `README.md` already existed and covered the Docker/CLI dev loop well, so this was an edit rather than a rewrite (the stale claim that the two services "exit immediately … the app code … does not exist yet" was removed, and the architected sections added). **Variable half:** the 17 names of the Env vars table were extracted from this file (`grep -oE '^\| `[A-Z_]+`' task.md | sed … | sort -u` → 17) and each was looked up in `README.md` → every one found, **`MISSING=0`**, the lowest counts being 1 (`SHOPIFY_ALPHA_STORE` … `PGSSLMODE`, `SUPABASE_*`). The new `## Environment variables` section carries the same four columns as the table here, so a reviewer does not need `task.md` to know what to set. **URL half:** `grep -oE 'https://[a-z0-9.-]*vercel\.app' README.md | sort -u` → exactly **one** URL, `https://technicalexamnodejs.vercel.app`, and it `resolves=200`. The `services` config and the binding are stated rather than left as magic: the README explains that the two apps are two Services in one project, why a service receives the original path (so the Express routes need no prefix), and quotes the binding object that makes Vercel inject `API_URL` — plus the same-origin consequence that `NEXT_PUBLIC_API_URL` stays unset. New sections beyond the `Do` list, because the `Done when` line asks a reader to understand the sync flow from the README alone: a `## How it fits together` diagram with the Step A/B/C description, a `## Known simplifications` section carrying the Open-questions findings (unauthenticated PATCH, last-known rather than live store prices, `failed` vs `mismatch`, single currency, the ~102 granted scopes, and the Services-beta dependency with the two-project fallback), and npm run steps for both apps. `plan.md` was not touched.
 - **Blocks:** `T-4.6`
 
 ---
 
 ## Phase 4 — End-to-end acceptance (maps to the plan's success criteria)
 
-### [ ] T-4.1 — Trigger a price update from the deployed dashboard and confirm the database reflects it
+### [x] T-4.1 — Trigger a price update from the deployed dashboard and confirm the database reflects it
 
 - **Depends on:** `T-3.4`, `T-3.5`, `T-3.6`
 - **Size:** `S`
@@ -768,7 +769,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none
 - **Done when:** the request succeeds and the central price is persisted.
 - **Verify:** the UI shows the new price after T-2.6's refresh; `docker run --rm --env-file backend/.env postgres:16 psql -w -t -A -c "select price from products where sku='<SKU>'"` → the new value.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**, driven from the **real browser on the deployed dashboard** (`https://technicalexamnodejs.vercel.app/`), not by calling the API directly. SKU chosen: `SKU-005` ("Ceramic Pour-Over Set"), the one SKU no earlier task had moved, so `45.00 → 47.50` is unambiguous. **Before:** psql read `SKU-005|45.00` and the deployed `/prices` row was `central_price 45.00`, both stores `synced` at `45.00`, `has_mismatch false`. **`Do` step 1 in the UI:** typed `47.50` into that row's price input and pressed its `Update` button — the page issued `REQ PATCH https://technicalexamnodejs.vercel.app/prices/SKU-005` → `RES 200`, so the request is the dashboard's own and it succeeded. **`Verify` first half:** the row's **central cell** (read as `children[1]`, so the typed input value cannot masquerade as the refreshed one) read `Central45.00` before and `Central47.50` **3.5s** after the submit, which is T-2.6's refresh landing — the two store cells stayed `synced`. Console capture during the whole interaction: **zero** messages. **`Verify` second half, an independent read rather than the API's own answer:** `select sku, price, updated_at from products where sku='SKU-005'` → `SKU-005|47.50|2026-09-20 12:02:55.015172+00`, i.e. the new value **persisted** with a fresh `updated_at`. The propagation is visible in the same read: `store_sync_status` holds `alpha | synced | 47.50` and `beta | synced | 47.50`, and the deployed `/prices` row reads `central_price 47.50`, both stores `synced`, `has_mismatch false`. **Data consequence for every task after this one:** `SKU-005` is no longer `45.00` — the seed value in `backend/seed/products.json` no longer describes the live row, so anything quoting the seed for `SKU-005` must re-read it.
 - **Blocks:** `T-4.2`, `T-4.6`
 
 ### [ ] T-4.2 — Confirm both Shopify admin panels show the new price
@@ -784,7 +785,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** `-`
 - **Blocks:** `T-4.6`
 
-### [ ] T-4.3 — Confirm the read endpoint reports no mismatch for both stores
+### [x] T-4.3 — Confirm the read endpoint reports no mismatch for both stores
 
 - **Depends on:** `T-4.1`, `T-1.17`
 - **Size:** `S`
@@ -794,10 +795,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none
 - **Done when:** the updated SKU reports both stores `synced`.
 - **Verify:** `curl -s https://<project>.vercel.app/prices | jq '.[] | select(.sku=="<SKU>") | {central_price, statuses: [.stores.alpha.status, .stores.beta.status], has_mismatch}'` → both `synced`, `has_mismatch: false`. **Restated 2026-09-20** (T-3.3 revision): one host, same path.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**, and the refresh does more work here than the `Verify` line implies. `Do` step 1's baseline refresh ran against the **live stores**: `node backend/scripts/refresh-status.js` → `20 rows in store_sync_status for 10 SKUs × 2 stores, 0 failed`, **exit 0**. That matters for a reason worth stating: the script *re-reads each store's real price through Shopify* and only then decides `synced` vs `mismatch`, so `0 failed` is an independent confirmation that **both stores genuinely hold `SKU-005`'s `47.50`** — it is not the PATCH's own claim read back, and it is the strongest available substitute for T-4.2's admin-panel observation. `Verify` on the deployed endpoint, filtered to the SKU T-4.1 moved → `{"central_price":"47.50","statuses":["synced","synced"],"has_mismatch":false}`, i.e. both stores `synced` and nothing flagged — and the whole board agrees: `flagged across all 10 SKUs = 0`. `jq` is not installed here, so the same `select`/projection was done with a one-line `node` parser over the identical response body.
 - **Blocks:** `T-4.6`
 
-### [ ] T-4.4 — Deliberate failure case — one store fails, the other still syncs
+### [x] T-4.4 — Deliberate failure case — one store fails, the other still syncs
 
 - **Depends on:** `T-4.1`
 - **Size:** `M`
@@ -808,10 +809,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** Vercel env var (dashboard) — no code change
 - **Done when:** the failure is isolated and visible, and the central price is still recorded.
 - **Verify:** Alpha's admin shows the new price; Beta is unchanged; the dashboard shows Beta `failed`/red and Alpha `synced`/green; `products.price` holds the new value. Observed in the UI *and* via `/prices` and the `store_sync_status` rows.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**, on the **deployed** backend (the `Files` line says Vercel env var, so the break was put where the demo runs, not in local `backend/.env`). `Do` step 1 without touching code or the dashboard UI: `vercel env rm SHOPIFY_BETA_STORE production --yes` → `vercel env add SHOPIFY_BETA_STORE` fed the bogus `betastore-does-not-exist-9f3a.myshopify.com` on stdin → `vercel deploy --prod --yes` (`Ready in 23s`, aliased), because a Vercel env var only reaches a function in a **new** deployment. SKU chosen: `SKU-006` (`36.75 → 41.00`), the second SKU untouched by earlier tasks. **Pre-state, so "Beta is unchanged" is measurable:** `products.price` `36.75`, both `store_sync_status` rows `synced | 36.75`, and each store read **live** through the Admin API (`findVariantBySku` with the real domains) → `alpha 36.75`, `beta 36.75`. **The failure, from the dashboard:** submit `41.00` in the browser on the deployed URL → `REQ PATCH …/prices/SKU-006` → `RES 200` with body `{"sku":"SKU-006","price":"41.00","stores":[{"store":"alpha","status":"synced","error":null},{"store":"beta","status":"failed","error":"token request for beta failed: HTTP 404 {\"errors\":\"Not Found\"}"}]}` — so the request as a whole is **not** an error, one store succeeded and the other carries its own reason (T-1.16's contract, now confirmed through the deployed path). **`Verify`, UI half:** after T-2.6's refresh the row reads central `41.00`, store A badge `synced` (computed `background-color` on the green `lab` side) and store B badge **`failed`** (`lab(92.24 …)`, the red side) whose `title` carries the full error text; T-2.7's inline message also renders (`beta: token request for beta failed: HTTP 404 …`, sampled 200ms apart — it appears with the refresh, so a single read taken too early sees no `<p>`). **`Verify`, data half — three independent reads, not the API agreeing with itself:** `products.price` → `SKU-006|41.00`, i.e. the central price was **still recorded** despite Beta's failure; `store_sync_status` → `alpha | synced | 41.00 | (no error)` and `beta | failed | (null live_price) | token request for beta failed: HTTP 404 …`; deployed `/prices` → `{"central_price":"41.00","has_mismatch":true,"alpha":"synced","beta":{"status":"failed","live_price":null}}`. **The stores themselves:** Alpha reads `41.00` from **two** independent credentials — the app's Admin API call and the CLI's own store session (`docker compose run --rm shopify store execute -s <alpha> …` → `{"sku":"SKU-006","price":"41.00"}`) — while Beta reads `36.75`, exactly its pre-state value, so **only Beta's branch was affected**. `Do` step 2 done and checked: the bogus value removed, the real one re-added from `backend/.env` (piped, never printed), `vercel env ls production` back to **12** names, redeployed (`Ready in 20s`, aliased). Beta's `live_price` is `null` rather than stale because the failure happened **before** the lookup, which is the `failed` branch T-1.15 defined (a failure after the lookup records `mismatch` with the stale price).
 - **Blocks:** `T-4.5`, `T-4.6`
 
-### [ ] T-4.5 — Recovery — restoring the credential returns the store to `synced`
+### [x] T-4.5 — Recovery — restoring the credential returns the store to `synced`
 
 - **Depends on:** `T-4.4`
 - **Size:** `S`
@@ -821,7 +822,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none
 - **Done when:** Beta's price matches central again and its status clears.
 - **Verify:** Beta admin shows the central price; `/prices` reports Beta `synced` with `has_mismatch: false` for that SKU.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `Do` step 1's credential restore was the closing half of T-4.4 (real value re-added to the Vercel project from `backend/.env`, 12 names, redeployed), so this task's own work is the re-submit and the read-back. **Re-submit from the dashboard, same SKU and same price** (`SKU-006` at `41.00`, which is the central price T-4.4 left behind — the recovery is "does Beta now take the price it refused", not a new price), in the deployed browser: the row's badges were `[synced, failed]` **before** the submit and `[synced, synced]` after, both on the green `lab(96.19 …)` background with `title` null, and the PATCH body came back `{"sku":"SKU-006","price":"41.00","stores":[{"store":"alpha","status":"synced","error":null},{"store":"beta","status":"synced","error":null}]}` with **no** inline message (nothing left to report). Console capture: zero messages. **`Verify`:** the deployed `/prices` row → `{"central_price":"41.00","statuses":["synced","synced"],"has_mismatch":false}`, and the whole board is clean again — `flagged across all 10 SKUs = 0`. **The status cleared rather than being overwritten with a stale value:** `select … from products p left join store_sync_status s using (sku) where p.sku='SKU-006'` → `alpha | synced | 41.00 | 2026-09-20 12:06:33.613727+00 | (no error)` and `beta | synced | 41.00 | 2026-09-20 12:06:34.377178+00 | (no error)`, i.e. Beta's `error` text from T-4.4 is gone and `live_price` moved from `null` to `41.00`. `Done when` holds at the store itself, not just in the log: Beta read live through the Admin API (real domain, app credential) → `beta live price = 41.00`, equal to central, with Alpha at the same value. The failed→synced transition therefore round-trips, which is the claim T-4.4 could not make on its own.
 - **Blocks:** `T-4.6`
 
 ### [ ] T-4.6 — Rehearsal — one clean run-through of the whole demo
