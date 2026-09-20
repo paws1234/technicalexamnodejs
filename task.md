@@ -29,12 +29,12 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | Phase | Tasks | Done / Total | Status |
 |---|---|---|---|
 | 0 — Environment & Store Preparation | 14 | 14 / 14 | complete |
-| 1 — Central Backend Service Development | 18 | 1 / 18 | in progress |
+| 1 — Central Backend Service Development | 18 | 3 / 18 | in progress |
 | 2 — Frontend Dashboard Development | 8 | 0 / 8 | not started |
 | 3 — Deployment | 7 | 0 / 7 | not started |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 15 / 53 done
+**Overall:** 17 / 53 done
 
 ## Environment variables
 
@@ -305,7 +305,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** 2026-09-20 — **verified**. `Do` steps run as written: `npm init -y` in `backend/`, then `npm install express cors pg dotenv --no-audit --no-fund` → `added 85 packages in 3s`. The committed `backend/package-lock.json` was an **empty stub** (`lockfileVersion 3`, `"packages": {}`, no root deps) and was therefore replaced by npm rather than kept — it declared nothing, so T-1.1 was not partly done as the file's presence suggested. `npm pkg delete main scripts.test` dropped npm-init's `main: index.js` (no such file) and its placeholder `Error: no test specified` script, then `npm pkg set type=module scripts.start="node src/server.js" scripts.dev="node --watch src/server.js"`. `Verify` green: `cd backend && npm ls --depth=0` → `cors@2.8.6`, `dotenv@18.0.1`, `express@5.2.1`, `pg@8.23.0`, **exit 0** with no `extraneous`/`missing` lines, and `node -e "import('express')"` → **exit 0**; `import('pg')` also resolves and exposes `Pool` as a function. `git status --short -uall` shows only `?? backend/package.json` and ` M backend/package-lock.json`; `git check-ignore -v backend/node_modules` → `.gitignore:1:node_modules`, so the installed tree stays untracked. Carried forward: (1) `npm install express` resolves to **express@5.2.1** — path-to-regexp v8, so no bare `*` wildcard routes and no optional-param syntax; nothing in T-1.7/T-1.12 uses either, and Express 5 auto-forwards async handler rejections, which T-1.14/T-1.15's per-store try/catch does not depend on. (2) The `start`/`dev` scripts already name `src/server.js`, so **T-1.8's `Do` step 2 ("point the dev/start npm scripts at it") and its `backend/package.json` edit are already satisfied**; T-1.8 only needs to create the file and confirm.
 - **Blocks:** `T-1.2`, `T-1.7`
 
-### [ ] T-1.2 — Add `backend/src/config.js` that fails fast on missing env vars
+### [x] T-1.2 — Add `backend/src/config.js` that fails fast on missing env vars
 
 - **Depends on:** `T-1.1`, `T-0.8`
 - **Size:** `S`
@@ -314,8 +314,8 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   1. Export `config` reading the names the app actually uses — `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGSSLMODE`, the four `SHOPIFY_*` names, `ALLOWED_ORIGIN`, `PORT` — via `dotenv`, and throw naming the first missing one. The two unused `SUPABASE_*` names stay in `.env.example` but are not required (decision 2026-09-20), so the blank `SUPABASE_SERVICE_ROLE_KEY` must not stop startup.
 - **Files / artifacts:** `backend/src/config.js`
 - **Done when:** loading it with a complete `.env` succeeds and reports the variable names (never the values); loading it with one variable removed fails loudly.
-- **Verify:** `node -e "import('./backend/src/config.js').then(c=>console.log(Object.keys(c.config).join(',')))"` → lists all keys; `env -u SHOPIFY_CLIENT_SECRET node -e "import('./backend/src/config.js')"` → non-zero exit whose message contains `SHOPIFY_CLIENT_SECRET`.
-- **Evidence:** `-`
+- **Verify:** `node -e "import('./backend/src/config.js').then(c=>console.log(Object.keys(c.config).join(',')))"` → lists all keys; `env SHOPIFY_CLIENT_SECRET= node -e "import('./backend/src/config.js')"` → non-zero exit whose message contains `SHOPIFY_CLIENT_SECRET`. **Restated 2026-09-20** from `env -u SHOPIFY_CLIENT_SECRET …`: `-u` removes the name from the process environment, and this module then refills it from `backend/.env`, so that form loads cleanly (exit 0) and cannot exercise the guard at all. An **empty** value is not overwritten by the loader, so it reaches the check. Both outcomes were measured — see Evidence.
+- **Evidence:** 2026-09-20 — **verified**; `backend/src/config.js` created. Shape: one `NAMES` map from the key each module uses to the environment variable behind it (`port`→`PORT`, `allowedOrigin`→`ALLOWED_ORIGIN`, the six `pg*`→`PG*`, the five `shopify*`→`SHOPIFY_*` — the `Do` step says "the four `SHOPIFY_*` names" but the Env-vars table has five, and `shopifyApiVersion` is the one `T-0.9`/`T-1.5` send in the API URL, so it is required), a single `filter` over that map's values which throws naming every missing one at once, and `config` built from the same map via `Object.fromEntries`, so the checked names and the exported object cannot drift. Keys are camelCase rather than the raw environment names because that is the form `T-1.7` (`config.allowedOrigin`) and `T-1.8` (`config.port`) are written against. `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` are deliberately not in the list (T-0.10 decision), so the blank service-role key does not stop startup. `dotenv.config` is given a **module-relative** path plus `quiet: true`: the file is found from `cwd=<repo root>` *and* from `cwd=backend/`, and dotenv's v17+ "injecting env" banner stays off a check's stdout (the `Verify` command's stdout *is* its result). **Verify 1** → `13 keys: port,allowedOrigin,pgHost,pgPort,pgDatabase,pgUser,pgPassword,pgSslMode,shopifyAlphaStore,shopifyBetaStore,shopifyClientId,shopifyClientSecret,shopifyApiVersion`, exit 0; the same import from `cwd=backend/` → `13 keys`, exit 0; and the two accessors the next tasks use resolve — `config.allowedOrigin` = `http://localhost:3001`, `config.port` = `"3000"` (the string form `listen` accepts). **Verify 2 as written** (`env -u SHOPIFY_CLIENT_SECRET`) → `loaded, no throw`, **exit 0** — it does *not* fail, which is the reason for the restatement above and not a defect in the module. Why, measured rather than assumed: `env -u X node -e "dotenv.config({path:'backend/.env'}); console.log(Boolean(process.env.X))"` → `true` (the loader refilled it from the file), while the same probe with `env X=` → `false`. **Verify 2 restated** (`env SHOPIFY_CLIENT_SECRET=`) → `threw: Missing required environment variable(s): SHOPIFY_CLIENT_SECRET`, **exit 1**, so the fail-fast path is genuinely exercised and the message names the variable. No separate check file: the logic is a filter over a name list and these two commands are the runnable check.
 - **Blocks:** `T-1.3`, `T-1.4`, `T-1.5`
 
 ### [ ] T-1.3 — Add the database module
@@ -370,7 +370,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** `-`
 - **Blocks:** `T-1.14`
 
-### [ ] T-1.7 — Create the Express app with CORS, JSON parsing, `/health`
+### [x] T-1.7 — Create the Express app with CORS, JSON parsing, `/health`
 
 - **Depends on:** `T-1.1`
 - **Size:** `M`
@@ -379,8 +379,8 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   1. Create `backend/src/app.js` exporting the app: `cors({ origin: config.allowedOrigin })`, `express.json()`, `GET /health` → `{ ok: true }`, and a JSON error handler.
 - **Files / artifacts:** `backend/src/app.js`
 - **Done when:** the app can be imported and started without side effects.
-- **Verify:** `node -e "import('./backend/src/app.js').then(m=>console.log(typeof m.app))"` → `function` (or `object`), and the T-1.8 server's `/health` responds.
-- **Evidence:** `-`
+- **Verify:** `node -e "import('./backend/src/app.js').then(m=>console.log(typeof m.app))"` → `function` (or `object`), and the T-1.8 server's `/health` responds. **Clarified 2026-09-20:** the `/health` half was taken now by listening this app on `config.port` and fetching it directly, because T-1.8's `server.js` does not exist yet; T-1.8 remains the task that owns the port.
+- **Evidence:** 2026-09-20 — **verified**. `backend/src/app.js` created: a named `app` export that never calls `listen` (so importing it has no side effects — T-1.8 owns the port and T-3.2 hands the same object to Vercel), `cors({ origin: config.allowedOrigin })`, `express.json()`, `GET /health` → `{ ok: true }`, and a 4-argument JSON error handler. **Verify part 1** → `typeof m.app = function`, exit 0 — the `Verify` line allows function or object, and Express 5's app is a callable. **Verify part 2** ran rather than being deferred to T-1.8: the app was listened on `config.port` directly in `/tmp/check_app_t17.mjs` → `listening on http://127.0.0.1:3000 (config.port was "3000")`, `/health -> 200 {"ok":true}`, exit 0, which also proves `listen` accepts the string form of `config.port`. The error handler is **proven, not just written**: a malformed body (`POST /health`, `Content-Type: application/json`, `{not json`) → `400 {"error":"Expected property name or '}' in JSON at position 1 (line 1 column 2)"}`, so body-parser's `err.status` is honoured and the answer is JSON instead of Express's HTML stack trace. A 5xx stays deliberately generic (`status < 500 ? err.message : 'Internal server error'`) so a database or Shopify failure cannot leak internals to a caller. Driver kept in `/tmp` — this task's artifacts line names only `backend/src/app.js`. Carried forward for T-1.12: Express 5 / path-to-regexp v8 has no bare `*` wildcard route and no optional-param syntax, and async handler rejections are auto-forwarded to this handler, which T-1.14/T-1.15's per-store try/catch does not rely on.
 - **Blocks:** `T-1.8`, `T-1.10`, `T-1.12`
 
 ### [ ] T-1.8 — Add the local server entry point
