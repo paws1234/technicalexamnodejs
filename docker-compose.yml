@@ -1,0 +1,140 @@
+# Local development stack. Vercel + Supabase cloud stay the deployed target (plan.md
+# Phase 4); this exists so the whole thing also runs offline, in containers, against a
+# stand-in for Supabase.
+#
+#   docker compose up --build               # db + PostgREST + API + dashboard
+#   docker compose run --rm shopify version # Shopify CLI (tools profile)
+#
+# Why a proxy: `@supabase/supabase-js` is a PostgREST client that always requests
+# <SUPABASE_URL>/rest/v1/<table>, mirroring Supabase's Kong gateway. PostgREST has no
+# base-path option, so the local stack reproduces that shape instead of forking the
+# application code: db <- postgrest <- proxy <- backend. Only SUPABASE_URL and
+# SUPABASE_SERVICE_ROLE_KEY differ from production, and both are set below.
+
+name: price-sync
+
+services:
+  # ---------------------------------------------------------------- Supabase stand-in
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432" # psql / TablePlus
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      # Run once, on an empty volume only. 01 before 02: the tables must exist before
+      # the seed rows land. These are the plan's own artifacts (T-0.11..T-0.13), so the
+      # cloud and local schemas cannot drift.
+      - ./backend/seed/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./backend/seed/products.sql:/docker-entrypoint-initdb.d/02-products.sql:ro
+      - ./docker/postgrest/roles.sql:/docker-entrypoint-initdb.d/03-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  postgrest:
+    image: postgrest/postgrest:v16.3
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://postgres:postgres@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      # Dev-only constant: Supabase ships this same string in its own local stack. It
+      # signs the two local keys (here and in the backend service) and is not a secret.
+      PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
+
+  proxy:
+    image: nginx:alpine
+    depends_on:
+      - postgrest
+    ports:
+      - "54321:80" # = SUPABASE_URL for host-side curl checks
+    volumes:
+      - ./docker/postgrest/proxy.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      # 127.0.0.1, not localhost: inside a container localhost resolves only to ::1 while
+      # nginx listens on IPv4, so the check would fail with "Connection refused" even
+      # though the proxy works. This path also exercises PostgREST and Postgres (it reads
+      # through the anon role), so "healthy" means the whole chain, not just nginx.
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/rest/v1/products?select=sku&limit=1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ------------------------------------------------------------------- Applications
+  backend:
+    build: ./backend
+    working_dir: /app
+    # Runs the install so a fresh clone needs nothing but Docker; `exec` keeps npm as
+    # PID 1 so compose can stop the container with a signal instead of a SIGKILL.
+    command: ["sh", "-c", "npm install --no-audit --no-fund && exec npm run dev"]
+    env_file:
+      - path: ./backend/.env
+        required: false # a fresh clone has no .env yet; config.js fails fast on the gaps
+    environment:
+      # Overrides .env: in-network names, plus the local keys from above.
+      SUPABASE_URL: http://proxy
+      SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MjA1MTIyMjQwMH0.KsfRrIND1_Q1yHGKFo0CxDZLKUszp1O5sJ_649P3WGI
+      HOME: /tmp # npm's cache must be writable by the non-root uid below
+      npm_config_cache: /tmp/.npm-cache
+    user: "${LOCAL_UID:-0}:${LOCAL_GID:-0}" # see .env.example — keeps files in ./backend yours
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      proxy:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    working_dir: /app
+    command: ["sh", "-c", "npm install --no-audit --no-fund && exec npm run dev"]
+    environment:
+      PORT: 3001
+      HOSTNAME: 0.0.0.0 # bind all interfaces, or the published port reaches nothing
+      # Browser-side calls leave the container, so they use the published port.
+      # Server components run inside it and must use API_URL (the host name is not
+      # resolvable there) — set both in T-2.2.
+      NEXT_PUBLIC_API_URL: http://localhost:3000
+      API_URL: http://backend:3000
+      HOME: /tmp
+      npm_config_cache: /tmp/.npm-cache
+    user: "${LOCAL_UID:-0}:${LOCAL_GID:-0}"
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - backend
+
+  # ------------------------------------------------------------------ Optional tools
+  # Not started by `up` — only `docker compose run --rm shopify ...`. The CLI covers the
+  # manual steps: `store execute` runs Admin API GraphQL (product seeding, the T-0.9
+  # variant lookup), `store auth` issues a token, `store graphiql` opens a UI. The sync
+  # itself needs a permanent custom-app token in backend/.env, not this one.
+  #   docker compose run --rm shopify store auth --store <store>.myshopify.com \
+  #     --scopes read_products,write_products
+  shopify:
+    profiles: [tools]
+    build: ./tools
+    working_dir: /work
+    entrypoint: ["shopify"]
+    environment:
+      # The CLI "stores an online access token for later reuse", so it must outlive the
+      # container — a named volume, not /tmp, or every command needs re-authenticating.
+      HOME: /home/shopify
+    ports:
+      - "3456:3456" # the CLI's local OAuth callback; change it if the CLI prints another
+    volumes:
+      - ./:/work # so --output-file results land in the repo, not inside the container
+      - shopify_config:/home/shopify
+
+volumes:
+  db_data:
+  shopify_config:

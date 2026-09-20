@@ -95,7 +95,8 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 - **Files / artifacts:** none — console step
 - **Done when:** both stores are listed in the Partner dashboard and each admin loads.
 - **Verify:** Partner dashboard → Stores lists both; `https://<alpha-handle>.myshopify.com/admin` and `https://<beta-handle>.myshopify.com/admin` each load their admin (named UI observation).
-- **Evidence:** `-`
+- **Evidence:** not run — blocked, not started (2026-09-20). `partners.shopify.com/organizations` redirected to `accounts.shopify.com/lookup` (title "Log in — Partners"), i.e. no Partner session in the browser. No `SHOPIFY_*` variables in the environment, no `shopify` CLI, no `~/.config/shopify`, and no `.env` anywhere in the workspace. Creating the stores requires a signed-in Partner account, which needs the user's own credentials.
+- **Blocked by:** user action — sign in to Shopify Partners, then either create the two development stores or hand over the session so they can be created through the Partner dashboard.
 - **Blocks:** `T-0.4`, `T-0.5`, `T-0.6`, `T-0.7`
 
 ### [ ] T-0.3 — Define the 10 shared SKUs in a checked-in seed file
@@ -164,7 +165,7 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 - **Evidence:** `-`
 - **Blocks:** `T-0.8`
 
-### [ ] T-0.8 — Write `backend/.env.example` (placeholder) and `backend/.env` (real, ignored)
+### [~] T-0.8 — Write `backend/.env.example` (placeholder) and `backend/.env` (real, ignored)
 
 - **Depends on:** `T-0.6`, `T-0.7`
 - **Size:** `S`
@@ -175,7 +176,8 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 - **Files / artifacts:** `backend/.env.example`, `backend/.env`
 - **Done when:** both files list all 9 backend variables and `.env` is ignored by git.
 - **Verify:** `git check-ignore -v backend/.env` → prints the ignore rule; `cut -d= -f1 backend/.env.example | sort` → all 9 names from the Env vars table.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — files created at the user's explicit request, ahead of `T-0.6`/`T-0.7`. Both structural checks pass: `git check-ignore -v backend/.env` → `.gitignore:2:.env       backend/.env` (exit 0), and `cut -d= -f1 backend/.env.example | sort` → exactly the 9 Env-vars-table names (count 9), with the same 9 names present in `backend/.env`. `git status --short -uall` lists only `?? backend/.env.example` while `git status --ignored backend/` lists `!! backend/.env`. `SHOPIFY_API_VERSION` pinned to `2026-07`, confirmed "Latest stable" (accessible until 2027-07-16) on `shopify.dev/docs/api/usage/versioning`. Left `[~]`: six values in `backend/.env` are still blank — three of them secret (`SUPABASE_SERVICE_ROLE_KEY`, `SHOPIFY_ALPHA_TOKEN`, `SHOPIFY_BETA_TOKEN`) and three not (`SUPABASE_URL`, both store domains) — so `Do` step 2 is unsatisfied.
+- **Remaining:** user fills the six blanks in `backend/.env` (the Supabase URL and both store domains are safe to share here; the three secrets are pasted by hand), then re-run `Verify` to close it.
 - **Blocks:** `T-1.2`, `T-3.3`
 
 ### [ ] T-0.9 — Prove the SKU→variant lookup works against Alpha
