@@ -28,13 +28,13 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 
 | Phase | Tasks | Done / Total | Status |
 |---|---|---|---|
-| 0 — Environment & Store Preparation | 14 | 3 / 14 | in progress |
+| 0 — Environment & Store Preparation | 14 | 4 / 14 | in progress |
 | 1 — Central Backend Service Development | 18 | 0 / 18 | not started |
 | 2 — Frontend Dashboard Development | 8 | 0 / 8 | not started |
 | 3 — Deployment | 7 | 0 / 7 | not started |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 3 / 53 done
+**Overall:** 4 / 53 done
 
 ## Environment variables
 
@@ -99,7 +99,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** 2026-09-20 — **verified**. `docker compose run --rm shopify store list` lists organisation `paws` (236557782) with three Dev/Advanced stores, all created 2026-09-20: `alphastore-sdgba8qx` (AlphaStore — the Alpha store), `betastore-haewq5ha` ("betastore" — the Beta store every later task uses) and a spare `betastore-himh5la5` ("BetaStore") that no task references; the spare is a leftover, delete it deliberately if it starts to confuse a check (destructive). Admin reachability needed a discriminating probe rather than a bare status code: every `<handle>.myshopify.com/admin`, real or not, answers `302` to its own login page, so the check is `curl -sL -o /dev/null -w '%{http_code} %{url_effective}'` — `alphastore-sdgba8qx` and `betastore-haewq5ha` both end on `403 https://admin.shopify.com/store/<handle>` (store exists, session required), while the control `price-sync-does-not-exist-9f3a` ends `404` still on its own login URL. Both admins load. The Dev Dashboard's Dev stores list shows the same organisation the CLI printed; the dashboard itself has no browser session in this agent, so the CLI listing plus the probe are the nearest live proof. Originally recorded 2026-09-20 as partly done with Beta missing; the Dev Dashboard route (not the Shopify admin) is what keeps `shop_not_permitted` from surfacing at T-0.6.
 - **Blocks:** `T-0.4`, `T-0.5`, `T-0.6`, `T-0.7`
 
-### [ ] T-0.3 — Define the 10 shared SKUs in a checked-in seed file
+### [x] T-0.3 — Define the 10 shared SKUs in a checked-in seed file
 
 - **Depends on:** `T-0.1`
 - **Size:** `S`
@@ -109,7 +109,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/seed/products.json`
 - **Done when:** the file parses, has 10 unique SKUs, and each entry has a name and a 2-decimal price.
 - **Verify:** `node -e "const p=require('./backend/seed/products.json'); const s=new Set(p.map(x=>x.sku)); if(p.length!==10||s.size!==10) throw new Error('expect 10 unique'); console.log(p.map(x=>x.sku).join(','))"` → prints `SKU-001,…,SKU-010`.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. The `Verify` command printed `SKU-001,SKU-002,…,SKU-010` and exited 0. Stronger than the task's own check, the file was diffed against the already-committed `backend/seed/products.sql` (same 10 rows, same names): parsing both gives 10 rows each and `JSON.stringify` of `[sku,name,Number(price)]` for JSON === SQL → `true`, so the two seed artifacts cannot drift silently. Also asserted every `"price":` literal in the file text matches `^[0-9]+\.[0-9]{2}$` (`19.99,12.50,24.00,29.95,45.00,34.75,14.00,39.90,52.00,89.50`) and every entry has a non-empty `name` → `true`/`true`, covering the `Done when` clause the `Verify` command leaves out. Values were taken from `products.sql` rather than invented, and `products.json` carries only the three specified fields.
 - **Blocks:** `T-0.4`, `T-0.5`, `T-0.13`, `T-1.17`
 
 ### [ ] T-0.4 — Seed the 10 products into Store Alpha

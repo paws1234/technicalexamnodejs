@@ -1,0 +1,12 @@
+[
+  { "sku": "SKU-001", "name": "Aero Travel Mug", "price": 19.99 },
+  { "sku": "SKU-002", "name": "Field Notebook A5", "price": 12.50 },
+  { "sku": "SKU-003", "name": "Merino Crew Socks", "price": 24.00 },
+  { "sku": "SKU-004", "name": "Canvas Tote Bag", "price": 29.95 },
+  { "sku": "SKU-005", "name": "Ceramic Pour-Over Set", "price": 45.00 },
+  { "sku": "SKU-006", "name": "Bamboo Desk Tray", "price": 34.75 },
+  { "sku": "SKU-007", "name": "Wool Felt Coasters (4-pack)", "price": 14.00 },
+  { "sku": "SKU-008", "name": "Insulated Bottle 750ml", "price": 39.90 },
+  { "sku": "SKU-009", "name": "Linen Apron", "price": 52.00 },
+  { "sku": "SKU-010", "name": "Brass Desk Lamp", "price": 89.50 }
+]
