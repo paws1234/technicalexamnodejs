@@ -19,12 +19,20 @@ This document outlines the strategic plan for implementing Task 3 of the technic
 
 ### Phase 1: Environment & Store Preparation
 
-1. **Shopify Partner Setup:** Create two separate free Shopify Partner development stores (e.g., *Store Alpha* and *Store Beta*).
+1. **Shopify Store Setup:** Create two separate free Shopify development stores (e.g., *Store Alpha* and *Store Beta*) from the **Dev Dashboard** (dev.shopify.com/dashboard → Dev stores).
 2. **Product Seeding:** Create 10 identical shared SKUs with matching product variants across both Shopify stores manually or via bulk import.
-3. **API Access Credentials:** Generate Custom App or Admin API access tokens with inventory/product write permissions for both stores.
+3. **API Access Credentials:** Create one **Dev Dashboard app** carrying inventory/product write permissions (`read_products`, `write_products`), release a version with those scopes, install it on both stores, and keep the app's client id + secret — the backend exchanges them for a short-lived Admin API token per store (see the note below).
 4. **Supabase Initialization:** Create a new cloud project, provision the PostgreSQL database, and set up the schema tables:
    * `products`: Stores SKU, product name, and central price.
    * `store_sync_status`: Tracks live prices, last sync timestamps, and sync health (`synced` vs `mismatch`) for each store per SKU.
+
+> **Note (2026-09-20) — item 3 replaces the original "Custom App or Admin API access tokens".** Shopify
+> no longer allows creating admin-created custom apps ("You can no longer create new admin-created
+> custom apps... For new apps, use Dev Dashboard or Shopify CLI"), so there is no store-admin token to
+> paste. The **client credentials grant** is used instead: one Dev Dashboard app installed on both
+> stores, exchanging its client id/secret for a 24h token per store. That grant only works when the app
+> and the store share an organisation, which is why both stores must be created from the Dev Dashboard.
+> See `task.md` assumption 1 and tasks T-0.2/T-0.6/T-0.7.
 
 ### Phase 2: Central Backend Service Development
 

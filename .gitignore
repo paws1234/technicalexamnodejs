@@ -4,3 +4,7 @@ node_modules
 .next
 .vercel
 .github
+
+# Written by tools/xdg-open when the Shopify CLI cannot reach a browser: the
+# authorization URL that `store auth` never prints itself.
+.shopify-auth-url

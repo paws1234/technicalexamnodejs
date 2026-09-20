@@ -44,14 +44,50 @@ curl -s "http://localhost:54321/rest/v1/?apikey=$KEY"   # OpenAPI doc: both tabl
 ### The Shopify CLI
 
 ```bash
+docker compose run --rm shopify auth login
 docker compose run --rm shopify store auth --store <store>.myshopify.com --scopes read_products,write_products
 docker compose run --rm shopify store execute --store <store>.myshopify.com -q '<graphql>' --allow-mutations
 ```
 
-It stores its token in a named volume, so authentication survives between commands. If it prints an
-OAuth callback on a port other than 3456, that is the `ports:` line to change. Note `store auth`
-issues an **online** token tied to your session; the tokens the sync needs are **offline** ones
-from a custom app (T-0.6/T-0.7).
+There are two auth flows and only one of them cares where the process runs.
+
+**`auth login`** prints a *user verification code* plus an `accounts.shopify.com/activate-with-code`
+URL that you open yourself. Nothing is ever redirected back to the container — the CLI fails to
+launch a browser (`Error: spawn xdg-open ENOENT`, harmlessly, since the image has none) and then
+just polls — so this works over the default bridge network.
+
+**`store auth`** is a PKCE flow whose callback is hardcoded to
+`http://127.0.0.1:13387/auth/callback` and bound to `127.0.0.1` *inside the container*. Under bridge
+networking the browser cannot reach that, which is why the `shopify` service runs with
+`network_mode: host`: the container then shares this machine's network namespace, its `127.0.0.1`
+is yours, and the redirect lands normally. Where host networking is unavailable (macOS/Windows
+Docker Desktop), run `store auth` on the host instead. Its prompt "Shopify CLI will open the app
+authorization page in your browser" is the step that previously could never complete.
+
+Tokens live in the `shopify_config` volume (`$HOME/.config/shopify-cli-*`), so they survive between
+`docker compose run` calls. Note `store auth` issues an **online** token tied to your session: fine for
+the ad-hoc seeding and lookups above, useless to the deployed sync, which uses a **Dev Dashboard app's**
+client id/secret instead (T-0.6) and mints a 24h token per store with
+`node backend/scripts/shopify-token.mjs <alpha|beta>`. Nothing is ever pasted out of a store admin,
+because admin-created custom apps can no longer be created.
+
+**`store auth` also needs one manual step**, because the CLI never shows you its authorization URL:
+it pipes the browser opener's output, and it only prints the URL itself when it believes the browser
+* failed* — which cannot be faked from inside the container (measured: exiting 0 and exiting 1 both
+leave it sitting at "will open the app authorization page" with no URL). `tools/xdg-open` therefore
+writes the URL where you can read it. So while `store auth` is blocking in one terminal:
+
+```bash
+cat .shopify-auth-url   # git-ignored; open the URL it contains to approve the app
+```
+
+If a previous attempt was interrupted, free the callback port first — otherwise the CLI exits with
+`Port 13387 is already in use.` A killed `docker compose run` leaves its container behind (and with
+host networking it keeps holding the port):
+
+```bash
+docker rm -f $(docker ps -q --filter name=price-sync-shopify)
+```
 
 ### Notes
 

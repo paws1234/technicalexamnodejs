@@ -43,20 +43,21 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | `SUPABASE_URL` | backend | Supabase → Project Settings → API | local `backend/.env`, Vercel (backend) |
 | `SUPABASE_SERVICE_ROLE_KEY` | backend | Supabase → Project Settings → API (secret) | local `backend/.env`, Vercel (backend) |
 | `SHOPIFY_ALPHA_STORE` | backend | T-0.2 store handle, `<handle>.myshopify.com` | local `backend/.env`, Vercel (backend) |
-| `SHOPIFY_ALPHA_TOKEN` | backend | T-0.6 custom app Admin API token | local `backend/.env`, Vercel (backend) |
 | `SHOPIFY_BETA_STORE` | backend | T-0.2 store handle | local `backend/.env`, Vercel (backend) |
-| `SHOPIFY_BETA_TOKEN` | backend | T-0.7 custom app Admin API token | local `backend/.env`, Vercel (backend) |
+| `SHOPIFY_CLIENT_ID` | backend | T-0.6 Dev Dashboard app client id — one app, both stores | local `backend/.env`, Vercel (backend) |
+| `SHOPIFY_CLIENT_SECRET` | backend | T-0.6 Dev Dashboard app client secret (secret) | local `backend/.env`, Vercel (backend) |
 | `SHOPIFY_API_VERSION` | backend | pinned Admin API version string | local `backend/.env`, Vercel (backend) |
 | `ALLOWED_ORIGIN` | backend | deployed frontend URL from T-3.5 | local `backend/.env`, Vercel (backend) |
 | `PORT` | backend | local only | `backend/.env` |
 | `NEXT_PUBLIC_API_URL` | frontend | T-3.3 deployed backend URL | local `frontend/.env.local`, Vercel (frontend) |
 
-`SUPABASE_SERVICE_ROLE_KEY` and both Shopify tokens are server-only — they must never appear in a
-`NEXT_PUBLIC_*` variable or in client-side code.
+`SUPABASE_SERVICE_ROLE_KEY` and `SHOPIFY_CLIENT_SECRET` are server-only — they must never appear
+in a `NEXT_PUBLIC_*` variable or in client-side code. The Admin API token itself is never stored:
+it is minted per store at runtime and cached until it expires (T-1.5).
 
 ## Open questions / assumptions
 
-1. **Shopify API surface is not fixed by the plan** (§3.1.3, §3.2.4 say "Custom App or Admin API access tokens"). Assumption: custom-app Admin API access token sent as `X-Shopify-Access-Token`, GraphQL Admin API for variant lookup, API version pinned in one place (`SHOPIFY_API_VERSION`, tasks T-0.8/T-1.5).
+1. **Shopify API surface is not fixed by the plan** (§3.1.3, §3.2.4 say "Custom App or Admin API access tokens"). Assumption: a **Dev Dashboard app** installed on both stores, exchanging `SHOPIFY_CLIENT_ID`/`SHOPIFY_CLIENT_SECRET` for a 24h Admin API token per store via the **client credentials grant**, sent as `X-Shopify-Access-Token`; GraphQL Admin API for variant lookup; API version pinned in one place (`SHOPIFY_API_VERSION`, tasks T-0.8/T-1.5). **Revised 2026-09-20:** the plan's other option — an admin-created custom app with a pasted access token — can no longer be created (Shopify's docs: "For new apps, use Dev Dashboard or Shopify CLI"), so the static `SHOPIFY_ALPHA_TOKEN`/`SHOPIFY_BETA_TOKEN` pair this file originally specified was replaced by the two app credentials.
 2. **What `GET /prices` compares against.** §3.2.3 says to "aggregate central database records with store sync logs", so the compared value is `store_sync_status.live_price` (last known), not a live per-request Shopify read. Consequence: drift introduced directly in a Shopify admin is only visible after T-1.17 runs. Confirm whether a live read per request is expected instead.
 3. **Nothing in the plan populates `store_sync_status` before the first `PATCH`.** Assumption: a refresh script reads live store prices and upserts the baseline (T-1.17), otherwise `GET /prices` has nothing to flag.
 4. **`mismatch` vs `failed`.** §3.1.4 names only `synced` / `mismatch`; §3.2.4 also says `mismatch`/`failed`. Assumption: both values exist — `failed` = Shopify call errored, `mismatch` = store price differs from central. Confirm if only two states are wanted.
@@ -84,19 +85,19 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 - **Evidence:** 2026-09-20 — `git init` created `.git/` (branch `master`, empty repo). `git check-ignore -v backend/node_modules .env frontend/.next` printed `.gitignore:1:node_modules`, `.gitignore:2:.env`, `.gitignore:4:.next` and exited 0. Patterns are written without a trailing slash: a directory-only pattern (`node_modules/`) does not match a path that does not exist yet, which the `Verify` command queries.
 - **Blocks:** `T-0.2`, `T-3.1`
 
-### [ ] T-0.2 — Create the two Shopify Partner development stores
+### [~] T-0.2 — Create the two Shopify development stores
 
 - **Depends on:** `T-0.1`
 - **Size:** `S`
-- **Why:** §3.1.1 — the two sync targets do not exist yet.
+- **Why:** §3.1.1 — the two sync targets; Alpha exists, Beta does not.
 - **Do:**
-  1. In the Shopify Partner dashboard, create two free development stores (Store Alpha, Store Beta).
+  1. In the **Dev Dashboard** (dev.shopify.com/dashboard) → **Dev stores**, create the two free development stores (Store Alpha, Store Beta) — or confirm Alpha is already listed and create Beta.
   2. Note both `<handle>.myshopify.com` domains.
 - **Files / artifacts:** none — console step
-- **Done when:** both stores are listed in the Partner dashboard and each admin loads.
-- **Verify:** Partner dashboard → Stores lists both; `https://<alpha-handle>.myshopify.com/admin` and `https://<beta-handle>.myshopify.com/admin` each load their admin (named UI observation).
-- **Evidence:** not run — blocked, not started (2026-09-20). `partners.shopify.com/organizations` redirected to `accounts.shopify.com/lookup` (title "Log in — Partners"), i.e. no Partner session in the browser. No `SHOPIFY_*` variables in the environment, no `shopify` CLI, no `~/.config/shopify`, and no `.env` anywhere in the workspace. Creating the stores requires a signed-in Partner account, which needs the user's own credentials.
-- **Blocked by:** user action — sign in to Shopify Partners, then either create the two development stores or hand over the session so they can be created through the Partner dashboard.
+- **Done when:** both stores appear under Dev Dashboard → Dev stores and each admin loads.
+- **Verify:** Dev Dashboard → Dev stores lists both; `https://<alpha-handle>.myshopify.com/admin` and `https://<beta-handle>.myshopify.com/admin` each load (named UI observation).
+- **Evidence:** 2026-09-20 — **partly done**. `docker compose run --rm shopify store list` reports organisation `paws` (236557782) holding one store, `alphastore-sdgba8qx` (AlphaStore, Dev plan, created 2026-09-20); Beta is missing. The original Partner-dashboard route is superseded: the Dev Dashboard is where apps and dev stores are managed now, and a dev store created elsewhere does not satisfy the client credentials grant in T-0.6, which requires the app and the store to share an organisation.
+- **Blocked by:** user action — create Beta from Dev Dashboard → Dev stores (not from the Shopify admin), which is what keeps `shop_not_permitted` from surfacing at T-0.6.
 - **Blocks:** `T-0.4`, `T-0.5`, `T-0.6`, `T-0.7`
 
 ### [ ] T-0.3 — Define the 10 shared SKUs in a checked-in seed file
@@ -138,30 +139,32 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 - **Evidence:** `-`
 - **Blocks:** `T-0.11`, `T-1.5`
 
-### [ ] T-0.6 — Create the Alpha custom app and capture its Admin API token
+### [ ] T-0.6 — Create the Dev Dashboard app and prove it mints an Alpha Admin API token
 
 - **Depends on:** `T-0.2`
 - **Size:** `S`
-- **Why:** §3.1.3 — without a write-scoped token there is no way to push prices.
+- **Why:** §3.1.3 — without a write-scoped credential there is no way to push prices. Admin-created custom apps can no longer be created, so the credential is a Dev Dashboard app exchanging its own credentials for a token, not a token copied out of a store admin.
 - **Do:**
-  1. In the Alpha admin, create a custom app with `read_products` + `write_products` scopes.
-  2. Install it and copy the Admin API access token.
-- **Files / artifacts:** none — console step (value stored in `backend/.env` at T-0.8)
-- **Done when:** an authenticated Admin API call against Alpha succeeds.
-- **Verify:** `curl -s -o /dev/null -w '%{http_code}' -H "X-Shopify-Access-Token: $SHOPIFY_ALPHA_TOKEN" "https://$SHOPIFY_ALPHA_STORE/admin/api/$SHOPIFY_API_VERSION/shop.json"` → `200`.
+  1. Dev Dashboard → Apps → **Create app** → *Start from Dev Dashboard* → name it (e.g. `Price Sync`) → Create.
+  2. **Versions** → create a version: app URL `https://shopify.dev/apps/default-app-home`, Webhooks API version = newest, scopes = `read_products` + `write_products` → **Release**. A released version is required before the app can be installed.
+  3. **Home** → **Install app** → select the Alpha store → Install.
+  4. **Settings** → copy **Client ID** and **Client secret**; they become `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` in `backend/.env` at T-0.8 (one app covers both stores).
+- **Files / artifacts:** none — console step (credentials stored in `backend/.env` at T-0.8)
+- **Done when:** the app's credentials mint an Admin API token for Alpha.
+- **Verify:** `set -a; . backend/.env; set +a; node backend/scripts/shopify-token.mjs alpha` → `OK alpha (…myshopify.com) token=… scope=write_products expires_in=86399`, exit 0. A `shop_not_permitted` error means the app and the store are in different organisations (see T-0.2).
 - **Evidence:** `-`
 - **Blocks:** `T-0.8`, `T-0.9`
 
-### [ ] T-0.7 — Create the Beta custom app and capture its Admin API token
+### [ ] T-0.7 — Install the same app on Beta and prove it mints a Beta token
 
-- **Depends on:** `T-0.2`
+- **Depends on:** `T-0.2`, `T-0.6`
 - **Size:** `S`
-- **Why:** §3.1.3 — Beta needs its own credential; the forced-failure test in T-1.15 depends on them being independent.
+- **Why:** §3.1.3 — Beta needs its own installation; the forced-failure test in T-1.15 depends on the two stores failing independently.
 - **Do:**
-  1. Repeat T-0.6 in the Beta admin.
-- **Files / artifacts:** none — console step (value stored in `backend/.env` at T-0.8)
-- **Done when:** an authenticated Admin API call against Beta succeeds.
-- **Verify:** `curl -s -o /dev/null -w '%{http_code}' -H "X-Shopify-Access-Token: $SHOPIFY_BETA_TOKEN" "https://$SHOPIFY_BETA_STORE/admin/api/$SHOPIFY_API_VERSION/shop.json"` → `200`.
+  1. In the same Dev Dashboard app as T-0.6, **Home** → **Install app** → select the Beta store → Install. No second app and no second set of credentials: the client credentials grant scopes a token to whichever store you ask, so one app covering both stores is the intended shape.
+- **Files / artifacts:** none — console step (no new `backend/.env` names; `SHOPIFY_BETA_STORE` is T-0.2's)
+- **Done when:** the app's credentials mint an Admin API token for Beta.
+- **Verify:** `set -a; . backend/.env; set +a; node backend/scripts/shopify-token.mjs beta` → `OK beta (…myshopify.com) token=… expires_in=86399`, exit 0.
 - **Evidence:** `-`
 - **Blocks:** `T-0.8`
 
@@ -172,12 +175,12 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 - **Why:** §3.4.1 — the deployment step needs an explicit, complete list of secrets; T-1.2 reads exactly these names.
 - **Do:**
   1. Create `backend/.env.example` with every backend row of the Env vars table as `<placeholder>` values, including `SHOPIFY_API_VERSION` pinned to one version string.
-  2. Create `backend/.env` with the real store domains, tokens, and the Supabase values (until T-0.10 exists, leave those two blank).
+  2. Create `backend/.env` with the real store domains, the app's client id/secret, and the Supabase values (until T-0.10 exists, leave those two blank).
 - **Files / artifacts:** `backend/.env.example`, `backend/.env`
 - **Done when:** both files list all 9 backend variables and `.env` is ignored by git.
 - **Verify:** `git check-ignore -v backend/.env` → prints the ignore rule; `cut -d= -f1 backend/.env.example | sort` → all 9 names from the Env vars table.
-- **Evidence:** 2026-09-20 — files created at the user's explicit request, ahead of `T-0.6`/`T-0.7`. Both structural checks pass: `git check-ignore -v backend/.env` → `.gitignore:2:.env       backend/.env` (exit 0), and `cut -d= -f1 backend/.env.example | sort` → exactly the 9 Env-vars-table names (count 9), with the same 9 names present in `backend/.env`. `git status --short -uall` lists only `?? backend/.env.example` while `git status --ignored backend/` lists `!! backend/.env`. `SHOPIFY_API_VERSION` pinned to `2026-07`, confirmed "Latest stable" (accessible until 2027-07-16) on `shopify.dev/docs/api/usage/versioning`. Left `[~]`: six values in `backend/.env` are still blank — three of them secret (`SUPABASE_SERVICE_ROLE_KEY`, `SHOPIFY_ALPHA_TOKEN`, `SHOPIFY_BETA_TOKEN`) and three not (`SUPABASE_URL`, both store domains) — so `Do` step 2 is unsatisfied.
-- **Remaining:** user fills the six blanks in `backend/.env` (the Supabase URL and both store domains are safe to share here; the three secrets are pasted by hand), then re-run `Verify` to close it.
+- **Evidence:** 2026-09-20 — files created at the user's explicit request, ahead of `T-0.6`/`T-0.7`. Both structural checks pass: `git check-ignore -v backend/.env` → `.gitignore:2:.env       backend/.env` (exit 0), and `cut -d= -f1 backend/.env.example | sort` → exactly the 9 Env-vars-table names (count 9), with the same 9 names present in `backend/.env`. `git status --short -uall` lists only `?? backend/.env.example` while `git status --ignored backend/` lists `!! backend/.env`. `SHOPIFY_API_VERSION` pinned to `2026-07`, confirmed "Latest stable" (accessible until 2027-07-16) on `shopify.dev/docs/api/usage/versioning`. Left `[~]`: six values in `backend/.env` are still blank — two of them secret (`SUPABASE_SERVICE_ROLE_KEY`, `SHOPIFY_CLIENT_SECRET`) and four not (`SUPABASE_URL`, both store domains, `SHOPIFY_CLIENT_ID`) — so `Do` step 2 is unsatisfied. Renamed 2026-09-20: `SHOPIFY_ALPHA_TOKEN`/`SHOPIFY_BETA_TOKEN` became `SHOPIFY_CLIENT_ID`/`SHOPIFY_CLIENT_SECRET` (still 9 backend names), because admin-created custom apps can no longer be created — see assumption 1.
+- **Remaining:** user fills the six blanks in `backend/.env` (the Supabase URL, both store domains and the client id are safe to share here; the two secrets are pasted by hand), then re-run `Verify` to close it.
 - **Blocks:** `T-1.2`, `T-3.3`
 
 ### [ ] T-0.9 — Prove the SKU→variant lookup works against Alpha
@@ -186,11 +189,12 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 - **Size:** `M`
 - **Why:** §3.2.4 Step B — every sync call starts with this lookup; proving the API surface here is the cheapest place to find out the query is wrong.
 - **Do:**
-  1. Run a GraphQL Admin API `productVariants(first: 1, query: "sku:SKU-001")` query against Alpha with the T-0.6 token (curl is fine — no app code yet).
-  2. Record the returned variant `id` and `price` shape.
+  1. Mint a token for Alpha: `set -a; . backend/.env; set +a; TOKEN=$(node backend/scripts/shopify-token.mjs alpha --print)`.
+  2. Run a GraphQL Admin API `productVariants(first: 1, query: "sku:SKU-001")` query against Alpha with that token (curl is fine — no app code yet).
+  3. Record the returned variant `id` and `price` shape.
 - **Files / artifacts:** none — throwaway request (the query string is reused in T-1.5)
 - **Done when:** the response contains exactly one variant node for `SKU-001` with its id and current price.
-- **Verify:** the curl returns HTTP 200 and the JSON body has `data.productVariants.edges[0].node.id` non-empty and `node.price` equal to the seeded price for `SKU-001`.
+- **Verify:** `curl -s -X POST "https://$SHOPIFY_ALPHA_STORE/admin/api/$SHOPIFY_API_VERSION/graphql.json" -H "X-Shopify-Access-Token: $TOKEN" -H 'Content-Type: application/json' -d '{"query":"{ productVariants(first: 1, query: \"sku:SKU-001\") { edges { node { id price } } } }"}'` returns HTTP 200 and the JSON body has `data.productVariants.edges[0].node.id` non-empty and `node.price` equal to the seeded price for `SKU-001`.
 - **Evidence:** `-`
 - **Blocks:** `T-1.5`, `T-1.6`
 
@@ -253,10 +257,10 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 - **Size:** `S`
 - **Why:** the phase is "environment prepared"; this proves it end to end before any sync code is written on top.
 - **Do:**
-  1. Re-run the Alpha and Beta `shop.json` checks, the `SKU-001` variant lookup on both stores, and the `products` count.
+  1. Re-run the Alpha and Beta token mints, the `SKU-001` variant lookup on both stores, and the `products` count.
 - **Files / artifacts:** none
 - **Done when:** all four checks pass together using only the variables in `backend/.env`.
-- **Verify:** Alpha `shop.json` → 200, Beta `shop.json` → 200, `SKU-001` variant node returned on both stores, `products` returns 10 rows.
+- **Verify:** `node backend/scripts/shopify-token.mjs alpha` and `node backend/scripts/shopify-token.mjs beta` → exit 0 each, `SKU-001` variant node returned on both stores, `products` returns 10 rows.
 - **Evidence:** `-`
 - **Blocks:** `T-1.1`
 
@@ -287,7 +291,7 @@ header `Status:` moves `not started` → `in progress` → `complete`.
   1. Export `config` reading exactly the names in `backend/.env.example` (via `dotenv`) and throw naming the first missing variable.
 - **Files / artifacts:** `backend/src/config.js`
 - **Done when:** loading it with a complete `.env` succeeds and reports the variable names (never the values); loading it with one variable removed fails loudly.
-- **Verify:** `node -e "import('./backend/src/config.js').then(c=>console.log(Object.keys(c.config).join(',')))"` → lists all keys; `env -u SHOPIFY_BETA_TOKEN node -e "import('./backend/src/config.js')"` → non-zero exit whose message contains `SHOPIFY_BETA_TOKEN`.
+- **Verify:** `node -e "import('./backend/src/config.js').then(c=>console.log(Object.keys(c.config).join(',')))"` → lists all keys; `env -u SHOPIFY_CLIENT_SECRET node -e "import('./backend/src/config.js')"` → non-zero exit whose message contains `SHOPIFY_CLIENT_SECRET`.
 - **Evidence:** `-`
 - **Blocks:** `T-1.3`, `T-1.4`, `T-1.5`
 
@@ -323,7 +327,7 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 - **Size:** `M`
 - **Why:** §3.2.4 Step B — locating the variant id per store is the first half of the sync.
 - **Do:**
-  1. Create `backend/src/shopify.js` exporting `findVariantBySku(sku, store)` that calls the T-0.9 GraphQL query with `X-Shopify-Access-Token` and returns `{ variantId, price }` or throws a descriptive error when the SKU is absent.
+  1. Create `backend/src/shopify.js` exporting `getAccessToken(store)` — the client credentials grant, cached per store until shortly before `expires_in` — and `findVariantBySku(sku, store)` that calls the T-0.9 GraphQL query with `X-Shopify-Access-Token` and returns `{ variantId, price }` or throws a descriptive error when the SKU is absent. The token is minted here, never read from the environment: 24h lifetime, refreshed on demand.
 - **Files / artifacts:** `backend/src/shopify.js`
 - **Done when:** the function returns the real variant id and current price for a seeded SKU on both stores.
 - **Verify:** `node -e "…findVariantBySku('SKU-001', stores[0]).then(console.log)"` → `{ variantId: 'gid://…', price: '<seeded price>' }` for Alpha, and the same for Beta.
@@ -458,7 +462,7 @@ header `Status:` moves `not started` → `in progress` → `complete`.
   1. Wrap each store's sync in its own try/catch: on error upsert that store's row as `failed` (or `mismatch` when the store price is known to differ) with the error text, and let the other store's branch complete normally.
 - **Files / artifacts:** `backend/src/app.js` (edit), `backend/src/queries.js` (edit)
 - **Done when:** a broken credential produces one failed row and one synced row, with the central price still updated.
-- **Verify:** set `SHOPIFY_BETA_TOKEN` to an invalid value, PATCH `SKU-002` to `30.00` → Alpha's store price becomes `30.00` (admin observation), `store_sync_status` shows Alpha `synced` and Beta `failed` with a non-null `error`, and `products.price` for `SKU-002` is `30.00`. Restore the token afterwards.
+- **Verify:** break only Beta's credential — point `SHOPIFY_BETA_STORE` at a non-existent store, so Beta's token mint fails while Alpha's is untouched — then PATCH `SKU-002` to `30.00` → Alpha's store price becomes `30.00` (admin observation), `store_sync_status` shows Alpha `synced` and Beta `failed` with a non-null `error`, and `products.price` for `SKU-002` is `30.00`. Restore the variable afterwards.
 - **Evidence:** `-`
 - **Blocks:** `T-1.16`, `T-1.18`
 
@@ -593,7 +597,7 @@ header `Status:` moves `not started` → `in progress` → `complete`.
   1. Use the T-1.16 response body to show a message next to the failing store (or a row-level error for a rejected request) instead of a generic failure.
 - **Files / artifacts:** `frontend/components/PriceEditor.tsx` (edit)
 - **Done when:** a store-level failure and a validation rejection are visually distinguishable.
-- **Verify:** with `SHOPIFY_BETA_TOKEN` invalid, update a row → the Beta badge turns red and the message names Beta; submitting `abc` as a price shows a validation error and sends no request. Restore the token afterwards.
+- **Verify:** with `SHOPIFY_BETA_STORE` pointing at a non-existent store, update a row → the Beta badge turns red and the message names Beta; submitting `abc` as a price shows a validation error and sends no request. Restore the variable afterwards.
 - **Evidence:** `-`
 - **Blocks:** `T-2.8`
 
@@ -755,7 +759,7 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 - **Size:** `M`
 - **Why:** §3.4.3 last bullet — "check that mismatches or errors are properly flagged if a simulated network or authentication failure occurs".
 - **Do:**
-  1. Break one store's credential only (invalid `SHOPIFY_BETA_TOKEN` in the backend env) and update a SKU from the dashboard.
+  1. Break one store's credential only (point `SHOPIFY_BETA_STORE` at a non-existent store in the backend env) and update a SKU from the dashboard.
   2. Restore the credential after recording the result.
 - **Files / artifacts:** Vercel env var (dashboard) — no code change
 - **Done when:** the failure is isolated and visible, and the central price is still recorded.
@@ -769,7 +773,7 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 - **Size:** `S`
 - **Why:** the mismatch state must be recoverable, otherwise the "single source of truth" claim only holds until the first error.
 - **Do:**
-  1. Restore `SHOPIFY_BETA_TOKEN`, re-submit the same SKU (or run the refresh script), and re-read the status.
+  1. Restore `SHOPIFY_BETA_STORE`, re-submit the same SKU (or run the refresh script), and re-read the status.
 - **Files / artifacts:** none
 - **Done when:** Beta's price matches central again and its status clears.
 - **Verify:** Beta admin shows the central price; `/prices` reports Beta `synced` with `has_mismatch: false` for that SKU.

@@ -1,0 +1,28 @@
+#!/bin/sh
+# Stand-in for xdg-open inside the Shopify CLI container.
+#
+# The CLI hands its authorization URL to a browser by spawning `xdg-open <url>`, but it
+# pipes the child's output, so anything we print to stdout/stderr is discarded. It only
+# prints the URL itself when the browser is reported as NOT opened, and that is not
+# something we can make it believe from out here (verified: exiting 0 and exiting 1 both
+# leave `store auth` sitting at "will open the app authorization page" with no URL shown).
+# So we surface the URL ourselves, two ways:
+#
+#   /dev/tty - straight to your terminal, bypassing the CLI's pipes. This is the normal
+#              path: `docker compose run` allocates a TTY.
+#   a file   - for when there is no TTY (`-T`, CI), where the URL would otherwise be lost.
+#              The CLI runs with the repo mounted at /work, so it lands somewhere you can
+#              read from the host. Override with SHOPIFY_AUTH_URL_FILE.
+#
+# Exiting 0 still matters: `auth login` treats a *spawn* failure as fatal and aborts with
+# `Error: spawn xdg-open ENOENT` *after* printing its one-time code, which makes that code
+# unredeemable. Reporting success keeps both flows alive.
+url=${1:-}
+[ -n "$url" ] || exit 0
+
+printf '\n[xdg-open] open this URL in your browser:\n%s\n\n' "$url" > /dev/tty 2>/dev/null || true
+# Overwrite, not append: the file should always name the attempt that is waiting right now,
+# and only one can be running at a time (the CLI owns port 13387 for the duration).
+printf '%s\n' "$url" > "${SHOPIFY_AUTH_URL_FILE:-/work/.shopify-auth-url}" 2>/dev/null || true
+
+exit 0

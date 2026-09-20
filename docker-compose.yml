@@ -120,17 +120,29 @@ services:
   # itself needs a permanent custom-app token in backend/.env, not this one.
   #   docker compose run --rm shopify store auth --store <store>.myshopify.com \
   #     --scopes read_products,write_products
+  #
+  # network_mode: host is what makes `store auth` work at all. The CLI hardcodes its
+  # OAuth callback as http://127.0.0.1:13387/auth/callback (dist/index.js:
+  # `var Gr=13387, ot="/auth/callback"`) and binds that exact port to 127.0.0.1 as well
+  # (`listen(13387, "127.0.0.1")`). On the default bridge network that loopback is the
+  # container's own, so the browser here can never deliver the code and the command sits
+  # at "will open the app authorization page" until it times out. Publishing a port
+  # cannot fix it: Docker forwards to the container's eth0 address, which a
+  # loopback-bound socket refuses. Verified both ways — bridge: `curl 127.0.0.1:13387` on
+  # the host is refused; host: the same curl reaches the CLI and gets an HTTP 400 for a
+  # bad `state`. Host networking is Linux-only, so where it is unavailable run only
+  # `store auth` on the host. `auth login` needs no callback and works either way.
+  # `ports:` is mutually exclusive with network_mode: host, hence its absence.
   shopify:
     profiles: [tools]
     build: ./tools
     working_dir: /work
     entrypoint: ["shopify"]
+    network_mode: host
     environment:
       # The CLI "stores an online access token for later reuse", so it must outlive the
       # container — a named volume, not /tmp, or every command needs re-authenticating.
       HOME: /home/shopify
-    ports:
-      - "3456:3456" # the CLI's local OAuth callback; change it if the CLI prints another
     volumes:
       - ./:/work # so --output-file results land in the repo, not inside the container
       - shopify_config:/home/shopify
