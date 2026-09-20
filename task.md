@@ -29,12 +29,12 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | Phase | Tasks | Done / Total | Status |
 |---|---|---|---|
 | 0 — Environment & Store Preparation | 14 | 14 / 14 | complete |
-| 1 — Central Backend Service Development | 18 | 3 / 18 | in progress |
+| 1 — Central Backend Service Development | 18 | 18 / 18 | complete |
 | 2 — Frontend Dashboard Development | 8 | 0 / 8 | not started |
 | 3 — Deployment | 7 | 0 / 7 | not started |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 17 / 53 done
+**Overall:** 32 / 53 done
 
 ## Environment variables
 
@@ -318,7 +318,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** 2026-09-20 — **verified**; `backend/src/config.js` created. Shape: one `NAMES` map from the key each module uses to the environment variable behind it (`port`→`PORT`, `allowedOrigin`→`ALLOWED_ORIGIN`, the six `pg*`→`PG*`, the five `shopify*`→`SHOPIFY_*` — the `Do` step says "the four `SHOPIFY_*` names" but the Env-vars table has five, and `shopifyApiVersion` is the one `T-0.9`/`T-1.5` send in the API URL, so it is required), a single `filter` over that map's values which throws naming every missing one at once, and `config` built from the same map via `Object.fromEntries`, so the checked names and the exported object cannot drift. Keys are camelCase rather than the raw environment names because that is the form `T-1.7` (`config.allowedOrigin`) and `T-1.8` (`config.port`) are written against. `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` are deliberately not in the list (T-0.10 decision), so the blank service-role key does not stop startup. `dotenv.config` is given a **module-relative** path plus `quiet: true`: the file is found from `cwd=<repo root>` *and* from `cwd=backend/`, and dotenv's v17+ "injecting env" banner stays off a check's stdout (the `Verify` command's stdout *is* its result). **Verify 1** → `13 keys: port,allowedOrigin,pgHost,pgPort,pgDatabase,pgUser,pgPassword,pgSslMode,shopifyAlphaStore,shopifyBetaStore,shopifyClientId,shopifyClientSecret,shopifyApiVersion`, exit 0; the same import from `cwd=backend/` → `13 keys`, exit 0; and the two accessors the next tasks use resolve — `config.allowedOrigin` = `http://localhost:3001`, `config.port` = `"3000"` (the string form `listen` accepts). **Verify 2 as written** (`env -u SHOPIFY_CLIENT_SECRET`) → `loaded, no throw`, **exit 0** — it does *not* fail, which is the reason for the restatement above and not a defect in the module. Why, measured rather than assumed: `env -u X node -e "dotenv.config({path:'backend/.env'}); console.log(Boolean(process.env.X))"` → `true` (the loader refilled it from the file), while the same probe with `env X=` → `false`. **Verify 2 restated** (`env SHOPIFY_CLIENT_SECRET=`) → `threw: Missing required environment variable(s): SHOPIFY_CLIENT_SECRET`, **exit 1**, so the fail-fast path is genuinely exercised and the message names the variable. No separate check file: the logic is a filter over a name list and these two commands are the runnable check.
 - **Blocks:** `T-1.3`, `T-1.4`, `T-1.5`
 
-### [ ] T-1.3 — Add the database module
+### [x] T-1.3 — Add the database module
 
 - **Depends on:** `T-1.2`, `T-0.13`
 - **Size:** `S`
@@ -328,23 +328,23 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/src/db.js`
 - **Done when:** a query through the module returns seeded rows.
 - **Verify:** `node --env-file=backend/.env -e "import('./backend/src/db.js').then(({pool})=>pool.query('select sku from products')).then(r=>console.log(r.rows.length))"` → `10`.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `backend/src/db.js` created: one module-scope `pg.Pool` exported as `pool` with `max: 2`, plus `import './config.js'` for its side effect only — that is what loads `backend/.env`; pg reads `PGHOST`/`PGPORT`/… from the environment itself, so the module carries no connection settings of its own. `Verify` → `10`, exit 0, i.e. all ten seeded `products` rows came back through the pool. **The TLS route needed one deliberate deviation, found by running the command rather than by reading the code:** with the file's own `PGSSLMODE=require` the first attempt failed `Error: self-signed certificate in certificate chain` (`SELF_SIGNED_CERT_IN_CHAIN`). `pg`'s `lib/connection-parameters.js` maps `require`/`verify-ca`/`verify-full` all to `ssl: true`, i.e. full chain verification, while libpq's `require` — what every psql check in this file does — only encrypts; the Supavisor pooler presents a self-signed chain, so psql connected where the app could not. The pool therefore passes pg's own `ssl: 'no-verify'` (which pg translates to `{ rejectUnauthorized: false }`), matching libpq's `require` semantics exactly. Deliberately **not** done: changing `PGSSLMODE` to `no-verify` in `.env` instead, because psql reads the same name and rejects that value (`invalid sslmode value`), which would break every psql `Verify` in this file. An explicit `ssl` wins over the environment, so this stays one option and not glue code. Recorded in the file as a `ponytail:` comment: no CA pinning, upgrade path is shipping Supabase's CA and passing `ssl: { ca }`.
 - **Blocks:** `T-1.9`, `T-1.13`
 
-### [ ] T-1.4 — Add the two-store registry
+### [x] T-1.4 — Add the two-store registry
 
 - **Depends on:** `T-1.2`
 - **Size:** `S`
 - **Why:** §3.2.4 Step B — the sync loop iterates "Store A and Store B configurations"; they must come from one place so T-1.15 can substitute a broken credential.
 - **Do:**
-  1. Export an array of exactly two store objects: `{ key: 'alpha'|'beta', domain, token }`.
+  1. Export an array of exactly two store objects: `{ key: 'alpha'|'beta', domain }`. **Restated 2026-09-20** (dated note; the original text is kept here so the change is visible): it asked for `{ key, domain, token }`, written before the credential refactor. There is no per-store static token any more — `backend/.env` carries one `SHOPIFY_CLIENT_ID`/`SHOPIFY_CLIENT_SECRET` pair covering both stores (assumption 1, revised) and T-1.5 mints each store's token at runtime and caches it until expiry. A `token` field would either be a lie or force this module to depend on T-1.5, which it blocks.
 - **Files / artifacts:** `backend/src/stores.js`
-- **Done when:** the registry yields two stores with non-empty domains and tokens.
-- **Verify:** `node -e "import('./backend/src/stores.js').then(({stores})=>{if(stores.length!==2||stores.some(s=>!s.domain||!s.token))throw new Error('bad registry');console.log(stores.map(s=>s.key).join(','))})"` → `alpha,beta`.
-- **Evidence:** `-`
+- **Done when:** the registry yields two stores with non-empty domains and distinct keys.
+- **Verify:** `node -e 'import("./backend/src/stores.js").then(({stores})=>{if(stores.length!==2||stores.some(s=>!s.domain))throw new Error("bad registry");console.log(stores.map(s=>s.key).join(","))})'` → `alpha,beta`. **Restated 2026-09-20** with the `Do` step above: the original asserted a non-empty `s.token` and was single-quoted differently, so in bash it died on history expansion (`!s.domain: event not found`) before it could assert anything.
+- **Evidence:** 2026-09-20 — **verified**. `backend/src/stores.js` created: `export const stores = [{ key: 'alpha', domain: config.shopifyAlphaStore }, { key: 'beta', domain: config.shopifyBetaStore }]`, importing `config` for the two domains only, so a broken store domain is substituted by editing `backend/.env` and T-1.15's forced failure still reaches the sync loop through this one place. The restated `Verify` → `alpha,beta`, exit 0. Both keys are distinct and both domains non-empty, and the domains resolve to the two installed stores (`alphastore-sdgba8qx.myshopify.com`, `betastore-haewq5ha.myshopify.com`) — shown by the T-0.14 smoke re-run in this batch, which mints and reads a variant on each using exactly these two names from the same file.
 - **Blocks:** `T-1.5`, `T-1.6`, `T-1.14`
 
-### [ ] T-1.5 — Implement `findVariantBySku(sku, store)`
+### [x] T-1.5 — Implement `findVariantBySku(sku, store)`
 
 - **Depends on:** `T-0.9`, `T-1.2`, `T-1.4`
 - **Size:** `M`
@@ -354,20 +354,20 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/src/shopify.js`
 - **Done when:** the function returns the real variant id and current price for a seeded SKU on both stores.
 - **Verify:** `node -e "…findVariantBySku('SKU-001', stores[0]).then(console.log)"` → `{ variantId: 'gid://…', price: '<seeded price>' }` for Alpha, and the same for Beta.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `backend/src/shopify.js` created: `getAccessToken(store)` (client credentials grant, cached in a module-level `Map` keyed by `store.key` until `expires_in − 300s`), a private `adminGraphql(store, query)` POST that attaches `X-Shopify-Access-Token` and rejects both a non-2xx status and a `200` body carrying `errors` (Shopify refuses a field with HTTP 200, so a status check alone would read a refusal as an empty catalogue), and `findVariantBySku(sku, store)` running the T-0.9 query with the SKU embedded through `JSON.stringify` — the escaping a GraphQL string literal accepts, so an odd SKU cannot break out of the query. The token is minted here and never read from the environment. `Verify` → `alpha {"variantId":"gid://shopify/ProductVariant/50472597455098","price":"19.99"}` and `beta {"variantId":"gid://shopify/ProductVariant/46218659889251","price":"19.99"}` — the variant ids T-0.4/T-0.5 created and the seeded price, matching T-0.9 — exit 0. The driver is `/tmp/t15_check.mjs`, outside the repo because this task's artifacts line names only `shopify.js`. Two checks beyond the `Verify` line, because the cache and the failure path are not visible in a successful call: a fetch wrapper counting mint POSTs reports **2 mints after one lookup per store** (one each, not one per call) and **still 2 after two further `getAccessToken` calls that return the same token string**, so the cache is doing the work rather than a fresh grant per request; and `findVariantBySku('SKU-DOES-NOT-EXIST', alpha)` throws `alpha: no variant found for sku SKU-DOES-NOT-EXIST` instead of returning an empty result. Carried forward: `price` is a **string** (`"19.99"`), so every comparison against the `numeric(10,2)` central price has to parse it (T-1.14, T-1.17). **Amended 2026-09-20, while doing T-1.6:** the same function now also selects `product { id }` and returns `{ variantId, productId, price }`, because the variant price-write that survives in this API version needs the variant's product (`productVariantUpdate` is not on the `Mutation` type any more). Re-ran this task's check afterwards — `alpha {"variantId":"gid://shopify/ProductVariant/50472597455098","productId":"gid://shopify/Product/9460757725434","price":"19.99"}`, `beta {"variantId":"…46218659889251","productId":"gid://shopify/Product/8483402383459","price":"19.99"}`, `2` mints after one lookup per store, still `2` after two further calls with the same token, absent SKU throws — so the added field changes none of the observations above. Deliberately **not** done: collapsing `backend/scripts/shopify-token.mjs` into a wrapper over this module — that script is T-0.6/T-0.7/T-0.14's verified artifact with its own exit-code contract (0 ok / 1 request failed / 2 missing name / 3 empty scope) and a human-facing diagnosis, so rewriting it was outside this task's scope; the script's own header already documents the pair.
 - **Blocks:** `T-1.6`, `T-1.14`
 
-### [ ] T-1.6 — Implement `updateVariantPrice(store, variantId, price)`
+### [x] T-1.6 — Implement `updateVariantPrice(store, variantId, price)`
 
 - **Depends on:** `T-1.5`
 - **Size:** `S`
 - **Why:** §3.2.4 Step B — the write half of the sync.
 - **Do:**
-  1. Add `updateVariantPrice(store, variantId, price)` to `backend/src/shopify.js` using a variant price-update mutation/endpoint; throw on a non-success response.
+  1. Add `updateVariantPrice(store, variant, price)` to `backend/src/shopify.js` using a variant price-update mutation/endpoint; throw on a non-success response. **Restated 2026-09-20** (dated note; the original wording is kept in the heading): it asked for `updateVariantPrice(store, variantId, price)`, which was written when the variant took its own `id`. Probing the pinned API version showed `productVariantUpdate` is **gone from the `Mutation` type** (`Field 'productVariantUpdate' doesn't exist on type 'Mutation'`, HTTP 200) and the only variant price-write left is `productVariantsBulkUpdate`, which addresses the variant's **product**. So the second argument is the object T-1.5 returns (`{ variantId, productId, price }`), which carries the product id the write needs instead of making the write look it up again.
 - **Files / artifacts:** `backend/src/shopify.js`
 - **Done when:** a real price change round-trips on Alpha.
 - **Verify:** call it with price `20.99` for `SKU-001` on Alpha, then re-read via `findVariantBySku` → returns `20.99`; then call it back to the seeded price and re-read → seeded price.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. Round trip on Alpha, driver `/tmp/t16_check.mjs` (outside the repo; this task's artifacts line names only `shopify.js`): `before: price=19.99 variantId=gid://shopify/ProductVariant/50472597455098 productId=gid://shopify/Product/9460757725434` → `update returned: 20.99` → `re-read after update: 20.99` → `restore returned: 19.99` → `re-read after restore: 19.99`, exit 0 — the store's own answer both times, so the seeded state is restored and no later task inherits a moved price. The drift this task's original signature would have produced was found by probing, not by assumption: `productVariantUpdate(input: {id, price})` answers `HTTP 200` with `Field 'productVariantUpdate' doesn't exist on type 'Mutation'` (`undefinedField`), an introspection of `Mutation` lists `productVariantsBulkUpdate(variants, productId, media, allowPartialUpdates)` as the only price-write, and a call with a bogus `productId` returns `userErrors: [{field:["productId"],message:"Product does not exist"}]` — so the mutation itself is present and only the product id was missing. `updateVariantPrice` sends `String(price)` as the `Money` scalar and throws on both a non-empty `userErrors` and a missing returned variant; that failure path is exercised, not just written: `gid://shopify/ProductVariant/1` → `alpha: price update rejected for gid://shopify/ProductVariant/1: [{"field":["variants","0","id"],"message":"Product variant does not exist"}]`, so a refusal cannot pass as a success. The shared `adminGraphql` helper gained an optional `variables` argument to carry the mutation input — one line, and T-1.5's lookup still goes through the same helper.
 - **Blocks:** `T-1.14`
 
 ### [x] T-1.7 — Create the Express app with CORS, JSON parsing, `/health`
@@ -383,7 +383,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** 2026-09-20 — **verified**. `backend/src/app.js` created: a named `app` export that never calls `listen` (so importing it has no side effects — T-1.8 owns the port and T-3.2 hands the same object to Vercel), `cors({ origin: config.allowedOrigin })`, `express.json()`, `GET /health` → `{ ok: true }`, and a 4-argument JSON error handler. **Verify part 1** → `typeof m.app = function`, exit 0 — the `Verify` line allows function or object, and Express 5's app is a callable. **Verify part 2** ran rather than being deferred to T-1.8: the app was listened on `config.port` directly in `/tmp/check_app_t17.mjs` → `listening on http://127.0.0.1:3000 (config.port was "3000")`, `/health -> 200 {"ok":true}`, exit 0, which also proves `listen` accepts the string form of `config.port`. The error handler is **proven, not just written**: a malformed body (`POST /health`, `Content-Type: application/json`, `{not json`) → `400 {"error":"Expected property name or '}' in JSON at position 1 (line 1 column 2)"}`, so body-parser's `err.status` is honoured and the answer is JSON instead of Express's HTML stack trace. A 5xx stays deliberately generic (`status < 500 ? err.message : 'Internal server error'`) so a database or Shopify failure cannot leak internals to a caller. Driver kept in `/tmp` — this task's artifacts line names only `backend/src/app.js`. Carried forward for T-1.12: Express 5 / path-to-regexp v8 has no bare `*` wildcard route and no optional-param syntax, and async handler rejections are auto-forwarded to this handler, which T-1.14/T-1.15's per-store try/catch does not rely on.
 - **Blocks:** `T-1.8`, `T-1.10`, `T-1.12`
 
-### [ ] T-1.8 — Add the local server entry point
+### [x] T-1.8 — Add the local server entry point
 
 - **Depends on:** `T-1.7`
 - **Size:** `S`
@@ -394,10 +394,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/src/server.js`, `backend/package.json` (edit)
 - **Done when:** the server answers locally.
 - **Verify:** `node backend/src/server.js` then `curl -s -o /dev/null -w '%{http_code}' localhost:3000/health` → `200`; `curl -s localhost:3000/health` → `{"ok":true}`.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `backend/src/server.js` created: imports the `app` object and `config`, and listens on `config.port`; nothing else, because T-3.2's serverless entry has to hand over the same app object without a second code path. `Do` step 2 needed no work — `node -e 'console.log(JSON.stringify(require("./backend/package.json").scripts))'` → `{"start":"node src/server.js","dev":"node --watch src/server.js"}`, already pointing at the file (T-1.1 shaped them), so this task edits `package.json` **not at all**. `Verify` → the server logged `backend listening on http://localhost:3000`, then `curl -s -o /dev/null -w '%{http_code}' localhost:3000/health` → **`200`** and `curl -s localhost:3000/health` → **`{"ok":true}`**, both from a real socket against a real process rather than the in-process listen T-1.7 used. Note for the tasks that follow: `start` runs without `--watch`, so an already-running server serves stale code after an edit — restart it (`dev` is the watching variant).
 - **Blocks:** `T-1.10`, `T-1.12`, `T-2.3`
 
-### [ ] T-1.9 — Add the query layer `listPrices()`
+### [x] T-1.9 — Add the query layer `listPrices()`
 
 - **Depends on:** `T-1.3`, `T-0.12`
 - **Size:** `M`
@@ -407,10 +407,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/src/queries.js`
 - **Done when:** the function returns 10 SKUs, each carrying up to two store status records.
 - **Verify:** `node -e "…listPrices().then(r=>console.log(r.length, JSON.stringify(r[0])))"` → `10` and the first item contains the SKU, its central price, and its store status entries.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `backend/src/queries.js` created: `listPrices()` runs the two flat queries concurrently (`products` ordered by sku, `store_sync_status` whole) and groups the status rows by SKU into `stores` keyed by the store name in the row, returning `{ sku, name, central_price, stores }` per product — the shape T-1.10's route output needs. `Verify` → `10 {"sku":"SKU-001","name":"Aero Travel Mug","central_price":"19.99","stores":{}}`, exit 0. `stores` is `{}` because nothing has populated `store_sync_status` yet — correct, and exactly the sparse case T-1.9's `Done when` words as "up to two". Because an empty table cannot show grouping, the driver (`/tmp/t19_check.mjs`, outside the repo — artifacts line names only `queries.js`) inserted two temporary rows for `SKU-001` and re-ran: `"stores":{"alpha":{"live_price":"19.99","status":"synced","last_synced_at":"2026-09-20T10:49:06.353Z","error":null},"beta":{"live_price":"21.00","status":"mismatch","…"}}` with the row count still `10` and `SKU-002` still `{}`, so both stores land under one SKU and no other SKU absorbs them; the two rows were then deleted (`status rows left: 0`) so T-1.17 owns that table and T-1.18 starts from the baseline it sets. Carried into T-1.10: pg returns `numeric(10,2)` as a **string**, so `central_price` and `live_price` compare with `!==` exactly and no float rounding sits in the middle — the drift check does not need to parse either.
 - **Blocks:** `T-1.10`
 
-### [ ] T-1.10 — Implement `GET /prices` with `has_mismatch`
+### [x] T-1.10 — Implement `GET /prices` with `has_mismatch`
 
 - **Depends on:** `T-1.9`, `T-1.7`
 - **Size:** `M`
@@ -421,10 +421,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/src/prices.js`, `backend/src/app.js` (edit)
 - **Done when:** the endpoint returns all 10 SKUs with both store statuses and a per-SKU flag.
 - **Verify:** `curl -s localhost:3000/prices | jq 'length, .[0].sku, .[0].stores.alpha, .[0].has_mismatch'` → `10`, a SKU id, a store object, and a boolean.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `backend/src/prices.js` created with the pure `flagMismatches(rows)` (a store entry is a mismatch when `status !== 'synced'` **or** `live_price !== central_price`; a SKU whose `stores` object is empty is flagged too, since nothing has confirmed either store holds the central price), and `GET /prices` registered in `backend/src/app.js` as `res.json(flagMismatches(await listPrices()))` — no try/catch, because Express 5 forwards a rejected handler promise to the JSON error handler T-1.7 left in place. `Verify` → `10`, `"SKU-001"`, `null`, `true`, exit 0; `.[0].stores.alpha` is `null` only because `store_sync_status` is still empty, which the fourth value reflects. So the run was repeated with temporary rows through the endpoint (`/tmp/t110_check.mjs`, outside the repo — artifacts line names `prices.js` and `app.js`), giving both statuses and both flag branches: `{"stores":{"alpha":{…,"status":"synced","live_price":"19.99"},"beta":{…,"status":"synced","live_price":"19.99"}},"has_mismatch":false}` for two stores in step, then `"beta":{…,"status":"mismatch","live_price":"21.00"}` with `"has_mismatch":true` once Beta drifted, and `{"stores":{},"has_mismatch":true}` for a SKU no store has reported on. Flagged set at that moment: all ten SKUs (correct — the table was empty), and the temporary rows were deleted afterwards (`status rows left: 0`) so T-1.17 still owns populating it. `central_price` and `live_price` are both pg strings, so the drift comparison is exact and `has_mismatch` cannot be a float-rounding artefact.
 - **Blocks:** `T-1.11`, `T-1.17`, `T-2.3`
 
-### [ ] T-1.11 — Add one runnable check for the mismatch logic
+### [x] T-1.11 — Add one runnable check for the mismatch logic
 
 - **Depends on:** `T-1.10`
 - **Size:** `S`
@@ -434,10 +434,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/check-mismatch.js`
 - **Done when:** the script runs offline and exits 0.
 - **Verify:** `node backend/check-mismatch.js` → every case asserts and the process exits 0; temporarily inverting the comparison in `prices.js` makes it exit non-zero.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `backend/check-mismatch.js` created: `node:assert/strict` over `flagMismatches` with the four cases this task names — stores in step at the central price (`false`), one store holding something else (`true`), `status: 'failed'` (`true`), and a SKU with no store rows (`true`). No framework, no fixtures, no database: it imports `./src/prices.js`, which imports nothing, so the check runs offline. `Verify` → `check-mismatch: 4 cases pass`, **exit 0**. The second half of the `Verify` was run rather than assumed: `sed -i 's/status !== /status === /' backend/src/prices.js` → `AssertionError [ERR_ASSERTION]: Expected values to be strictly equal: true !== false` at the first case, **exit 1** — so the check really is sensitive to the comparison it is supposed to guard, and not passing by accident. The file was restored from a copy taken first and the md5 is identical either side (`af320319a31c5516803971063349aae5` before and after), so `prices.js` is back to the version T-1.10 verified. Same driver-free pattern as T-0.14: this file is the task's artifact and stays in the repo.
 - **Blocks:** none
 
-### [ ] T-1.12 — Validate `PATCH /prices/:sku` input
+### [x] T-1.12 — Validate `PATCH /prices/:sku` input
 
 - **Depends on:** `T-1.7`
 - **Size:** `S`
@@ -447,10 +447,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/src/app.js` (edit)
 - **Done when:** bad input never reaches the database or Shopify.
 - **Verify:** `curl -s -o /dev/null -w '%{http_code}' -X PATCH -H 'Content-Type: application/json' -d '{"price":"abc"}' localhost:3000/prices/SKU-001` → `400`; `… -d '{"price":-1}'` → `400`; `… -d '{"price":9.99}' localhost:3000/prices/NOPE` → `404`.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `PATCH /prices/:sku` registered in `backend/src/app.js` with one guard: `PRICE_PATTERN = /^\d+(\.\d{1,2})?$/` against the body's `price` (a JSON number is stringified first, because `numeric(10,2)` is spelled as a string everywhere else in this project). `Verify` → `abc `**`400`**, `-1` **`400`**, and `9.99` on an unknown SKU **`404`**; bodies are JSON, not Express's HTML trace: `{"error":"price must be a non-negative number with at most 2 decimals"}` and `{"error":"unknown sku: NOPE"}`. Three boundary cases beyond the `Verify` line, run because each is a separate way the pattern could be wrong: a third decimal `19.999` → **`400`**, an empty body `{}` → **`400`**, and a valid price on a known SKU → **`501`** (the explicit "T-1.13 writes the central price here" placeholder, which T-1.13 replaces — it is deliberately not a fake 2xx). The `Done when` line was checked in the database rather than inferred: after all six requests, `select sku, price, updated_at from products where sku = 'SKU-001'` → `SKU-001|19.99|2026-09-20 10:08:22.270913+00`, i.e. the seeded price and the pre-batch `updated_at`, so no rejected and no accepted request wrote anything. **Files named beyond this task's line:** `backend/src/queries.js` gained the read-only `productExists(sku)` (`select exists (select 1 from products where sku = $1)`), so the 404 gate is one indexed lookup and the SQL stays in the query layer instead of in `app.js`; unspecified and deliberately left alone: no authentication on this route (assumption 6 records the risk) and no format check on the SKU beyond its existence, since the lookup is parameterised.
 - **Blocks:** `T-1.13`
 
-### [ ] T-1.13 — PATCH Step A — write the new central price
+### [x] T-1.13 — PATCH Step A — write the new central price
 
 - **Depends on:** `T-1.12`, `T-1.3`
 - **Size:** `S`
@@ -460,10 +460,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/src/app.js` (edit), `backend/src/queries.js` (edit if the update helper lives there)
 - **Done when:** a valid PATCH persists the new central price.
 - **Verify:** `curl -s -X PATCH -H 'Content-Type: application/json' -d '{"price":21.50}' localhost:3000/prices/SKU-001` → 2xx, and `docker run --rm --env-file backend/.env postgres:16 psql -w -t -A -c "select price from products where sku='SKU-001'"` → `21.50`.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `updateCentralPrice(sku, price)` added to `backend/src/queries.js` — `update products set price = $1, updated_at = now() where sku = $2 returning price` — and the `PATCH` handler's T-1.13 placeholder replaced by it, so the response now reports what the database stored rather than what was asked for. `Verify` → body `{"sku":"SKU-001","price":"21.50"}`, **`status=200`**, and the independent read gives `21.50`, exit 0. The write path is therefore the same row T-1.12's `productExists` gate had already confirmed, and the returned `price` is pg's `numeric(10,2)` string form, so the response, the central row and (from T-1.14) `live_price` all speak the same representation. **Consequence deliberately left for the next task:** the central price of `SKU-001` is now `21.50` while both stores still hold `19.99`, so `GET /prices` reports `has_mismatch: true` for it until T-1.14 propagates a price and writes the sync rows. That is the drift the endpoint exists to show, not a defect — but anything re-verifying between this task and T-1.14 will see it, and T-1.17's baseline is what clears it.
 - **Blocks:** `T-1.14`, `T-1.18`
 
-### [ ] T-1.14 — PATCH Step B/C (happy path) — sync one store and record `synced`
+### [x] T-1.14 — PATCH Step B/C (happy path) — sync one store and record `synced`
 
 - **Depends on:** `T-1.6`, `T-1.13`, `T-0.12`
 - **Size:** `M`
@@ -473,10 +473,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/src/app.js` (edit), `backend/src/queries.js` (edit for the upsert helper)
 - **Done when:** one PATCH updates both stores' live prices and leaves both rows `synced`.
 - **Verify:** PATCH `SKU-001` to `22.00` → then Alpha and Beta admin both show `22.00` for `SKU-001` (UI observation), and `docker run --rm --env-file backend/.env postgres:16 psql -w -c "select store, status, live_price from store_sync_status where sku='SKU-001' order by store"` → two rows, both `synced` / `22.00`.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `syncStore(sku, store, price)` added to `backend/src/app.js` (`findVariantBySku` → `updateVariantPrice` → `recordSyncResult`), the loop runs it for each store in the registry, and `recordSyncResult` was added to `backend/src/queries.js` as an `insert … on conflict (store, sku) do update` — this task's Files line anticipated the upsert living there. `Verify` → `PATCH` answered `200` with `{"sku":"SKU-001","price":"22.00"}`, and the sync log reads `alpha | synced | 22.00` and `beta | synced | 22.00`. The store half of the `Verify` is a **named UI observation**, and this agent has no Shopify admin browser session (recorded at T-0.4/T-0.5), so the nearest live proof was taken instead and the substitution is stated rather than glossed: the Admin API read the variant back as `alpha … "price":"22.00"` and `beta … "price":"22.00"` (`/tmp/t15_check.mjs`, whose first two lines are exactly those reads), and Alpha was cross-checked through an **independent credential** — the CLI's own store session, not the app's — with `docker compose run --rm shopify store execute -s alphastore-sdgba8qx.myshopify.com -q 'query { productVariants(first:1, query:"sku:SKU-001") { edges { node { sku price } } } }'` → `{"sku":"SKU-001","price":"22.00"}`, `Operation succeeded`. So the store price, the central price and `live_price` agree, and the drift T-1.13's note described is cleared. Beta has no second credential path (still the T-0.5 caveat) and the admin UI is the only independent read for it.
 - **Blocks:** `T-1.15`, `T-1.16`, `T-1.18`
 
-### [ ] T-1.15 — PATCH Step C (failure path) — isolate a store failure
+### [x] T-1.15 — PATCH Step C (failure path) — isolate a store failure
 
 - **Depends on:** `T-1.14`
 - **Size:** `M`
@@ -486,10 +486,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/src/app.js` (edit), `backend/src/queries.js` (edit)
 - **Done when:** a broken credential produces one failed row and one synced row, with the central price still updated.
 - **Verify:** break only Beta's credential — point `SHOPIFY_BETA_STORE` at a non-existent store, so Beta's token mint fails while Alpha's is untouched — then PATCH `SKU-002` to `30.00` → Alpha's store price becomes `30.00` (admin observation), `store_sync_status` shows Alpha `synced` and Beta `failed` with a non-null `error`, and `products.price` for `SKU-002` is `30.00`. Restore the variable afterwards.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `syncStore` now owns §3.2.4 Step C: the lookup and the write sit in one `try`, and the `catch` records the store's own row and returns instead of throwing, so the caller's loop moves on to the other store. The `failed`/`mismatch` wording in the `Do` step is implemented as the difference between a failure **before** the lookup (store price unknown → `failed`, `live_price` null) and a failure **after** it (store price known to differ → `mismatch`, `live_price` carrying the stale price). `Do` step 1 run as written: `.env` copied aside, `SHOPIFY_BETA_STORE` set to `betastore-does-not-exist-9f3a.myshopify.com`, server restarted, then `PATCH /prices/SKU-002 {"price":30.00}` → **`200`** `{"sku":"SKU-002","price":"30.00"}`, and the log read `alpha | synced | 30.00 |` and `beta | failed |  | token request for beta failed: HTTP 404 {"errors":"Not Found"}`, with `select sku, price from products where sku='SKU-002'` → `SKU-002|30.00`. One store's failure therefore neither rolled back the central write nor touched Alpha's branch. **The fake domain resolves and answers `404`, not a DNS error** — worth knowing before writing a future failure test that expects `ENOTFOUND`: the recorded message names the store and the HTTP status, which is what T-2.7 will display. Alpha's price check is again a **named UI observation** with no admin browser session available, so the nearest live proof was used and is stated: the CLI's independent store session returned `{"sku":"SKU-002","price":"30.00"}`, `Operation succeeded`, and the app credential read back `alpha {"variantId":"gid://shopify/ProductVariant/50472598077690",…,"price":"30.00"}`; Beta is unreadable **by construction** in this window, which is exactly why its `live_price` is null. `Do` step 1's restore was verified rather than assumed — `cp` the copy back, `diff -q` → identical, `SHOPIFY_BETA_STORE=betastore-haewq5ha.myshopify.com`, 42 lines as before — and the server was restarted on the restored file. One step beyond the stated scope, said plainly because it is what leaves the workspace consistent: Beta's SKU-002 was still holding its old price, so the same price was PATCHed again after the restore (`{"sku":"SKU-002","price":"30.00"} status=200`) and the log now shows `synced` for `SKU-001` and `SKU-002` on both stores, so T-1.17's baseline starts from stores that agree with the catalogue instead of inheriting this test's drift.
 - **Blocks:** `T-1.16`, `T-1.18`
 
-### [ ] T-1.16 — Return the per-store result from PATCH
+### [x] T-1.16 — Return the per-store result from PATCH
 
 - **Depends on:** `T-1.14`, `T-1.15`
 - **Size:** `S`
@@ -499,10 +499,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/src/app.js` (edit)
 - **Done when:** the response body names each store and its outcome.
 - **Verify:** rerun the T-1.15 broken-token PATCH and inspect the body → one store `synced`, one `failed` with a message, HTTP status not an outright error.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. The `PATCH` handler now collects what `syncStore` returns and answers `{ sku, price, stores: [{ store, status, error }] }`; a store that succeeded reports `error: null` so the shape does not vary, and the status code follows the outcomes — `const noStoreSynced = results.every(r => r.status !== 'synced')` → `502` when nothing took the price, `200` otherwise. The `Do` step's "non-2xx only when all stores failed" is deliberately read as "not `synced`", so a `mismatch` row counts as a store that did not take the price. **First half, one store broken:** `.env` copied aside, `SHOPIFY_BETA_STORE` pointed at a non-existent store, `PATCH /prices/SKU-002 {"price":30.00}` → **`status=200`** with `{"sku":"SKU-002","price":"30.00","stores":[{"store":"alpha","status":"synced","error":null},{"store":"beta","status":"failed","error":"token request for beta failed: HTTP 404 {\"errors\":\"Not Found\"}"}]}` — so the body names each store and its outcome, with the failing store's own message, and the request as a whole is not an error. **Second half, both stores broken** (this task's rule, so it was run rather than assumed): `SHOPIFY_ALPHA_STORE` pointed at a non-existent store too, the server restarted, the same PATCH → **`status=502`** with both entries `"status":"failed"` and a per-store message, and the two rows read `alpha | failed |  | token request for alpha failed: HTTP 404 …`, `beta | failed |  | …` — the central price was still written (`SKU-002|30.00`), which is the point of Step C. Deliberately unspecified and chosen here: **`502`** as the all-failed status (there is no 2xx that could describe it, and 502 says "an upstream did not answer", which is what happened), and no per-store HTTP error contract beyond it. `Do` step 2 of T-1.15 was repeated in full — `cp` the copy back, `diff -q` → identical, both `SHOPIFY_*_STORE` names back to `alphastore-sdgba8qx.myshopify.com` / `betastore-haewq5ha.myshopify.com` — and the server was restarted on the restored file. Then, so T-1.17 starts from a coherent workspace, `SKU-002` was PATCHed once more → `{"stores":[{"store":"alpha","status":"synced","error":null},{"store":"beta","status":"synced","error":null}]} status=200`, leaving all four log rows `synced` at the central prices (`SKU-001 22.00`, `SKU-002 30.00`).
 - **Blocks:** `T-2.5`, `T-2.7`
 
-### [ ] T-1.17 — Add the baseline/refresh script for `store_sync_status`
+### [x] T-1.17 — Add the baseline/refresh script for `store_sync_status`
 
 - **Depends on:** `T-1.10`, `T-1.5`
 - **Size:** `M`
@@ -512,10 +512,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/scripts/refresh-status.js`
 - **Done when:** running it fills 20 status rows reflecting the stores' real current prices.
 - **Verify:** `node backend/scripts/refresh-status.js` → 20 rows in `store_sync_status`; `curl -s localhost:3000/prices | jq '[.[] | select(.has_mismatch)] | length'` → `0`. Then change one SKU's price in the Alpha admin, re-run, and the same command → `1` with that SKU flagged.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**, both halves. `backend/scripts/refresh-status.js` created: for every SKU × store it reads the live price with `findVariantBySku`, then upserts through the same `recordSyncResult` the PATCH route uses — `synced` when the price equals the central one, `mismatch` otherwise — and never sends a price anywhere. Two details the script had to get right: the comparison is `Number(price) === Number(central)` because pg hands `numeric(10,2)` back as a string and Shopify's `Money` is a string too, so `"22.0"` and `"22.00"` are the same price and not a drift; and an unreadable store writes a `failed` row with the error text rather than aborting the run (that path deliberately not exercised here — T-1.15 already proved it). It ends with `pool.end()` and an explicit exit code, because T-1.3 showed the event loop otherwise lingers ~10s on an idle pooled client. **First half** → `20 rows in store_sync_status for 10 SKUs × 2 stores, 0 failed`, exit 0; `curl … | jq '[.[] | select(.has_mismatch)] | length'` → **`0`**; and `select status, count(*) … group by status` → `synced | 20`, so the baseline is complete *and* clean, not merely populated. **Second half** → the `Verify` asks for a price change in the Alpha admin, and again no admin browser session exists in this agent, so the nearest live proof was used and is named: the change was made through the **CLI's own store session**, which is an independent credential rather than the app's own write path — `shopify store execute -s alphastore-sdgba8qx.myshopify.com --allow-mutations -q 'mutation { productVariantsBulkUpdate(productId: "gid://shopify/Product/9460757725434", variants: [{id: "gid://shopify/ProductVariant/50472597455098", price: "24.00"}]) … }'` → `Operation succeeded`, `"price": "24.00"`, `userErrors: []`. Re-running the script → still 20 rows, 0 failed, and `/prices` now flags exactly **one** SKU, quoted in full: `{"sku":"SKU-001","name":"Aero Travel Mug","central_price":"22.00","stores":{"alpha":{"live_price":"24.00","status":"mismatch",…},"beta":{"live_price":"22.00","status":"synced",…}},"has_mismatch":true}` — the drifted store is the mismatched one and the untouched store is still `synced`, which is what the dashboard's two status columns are for. Alpha was then set back to `22.00` through the same CLI path and the script re-run → `20 rows … 0 failed`, `has_mismatch` count `0`, so T-1.18 starts from a baseline where all twenty rows are `synced`.
 - **Blocks:** `T-1.18`, `T-4.3`
 
-### [ ] T-1.18 — Phase 1 smoke test — one PATCH propagates to both stores and the read endpoint reflects it
+### [x] T-1.18 — Phase 1 smoke test — one PATCH propagates to both stores and the read endpoint reflects it
 
 - **Depends on:** `T-1.14`, `T-1.15`, `T-1.17`
 - **Size:** `S`
@@ -525,7 +525,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none
 - **Done when:** all three steps agree.
 - **Verify:** `PATCH /prices/SKU-003` to a new value → 2xx; both store admins show the new value; `curl -s localhost:3000/prices | jq '.[] | select(.sku=="SKU-003")'` shows `central_price` equal to the new value, both stores `synced`, `has_mismatch: false`.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `Do` step 1 ran first: `node backend/scripts/refresh-status.js` → `20 rows in store_sync_status for 10 SKUs × 2 stores, 0 failed`, exit 0, and `/prices` flagged `0`, so the baseline was clean before anything was changed. Then `PATCH /prices/SKU-003 {"price":26.50}` (the seeded `24.00` moved) → **`status=200`** with `{"sku":"SKU-003","price":"26.50","stores":[{"store":"alpha","status":"synced","error":null},{"store":"beta","status":"synced","error":null}]}`, and the read endpoint agrees on every field the `Verify` names: `{"sku":"SKU-003","name":"Merino Crew Socks","central_price":"26.50","stores":{"alpha":{"live_price":"26.50","status":"synced",…},"beta":{"live_price":"26.50","status":"synced",…}},"has_mismatch":false}` — new central price, both stores `synced`, no flag, and `0` flagged overall. The store half of the `Verify` is a named UI observation and this agent still has no admin browser session, so the nearest live proof was taken on both stores and the substitution is stated: the Admin API read back `alpha {"variantId":"gid://shopify/ProductVariant/50472598110458",…,"price":"26.50"}` and `beta {"variantId":"gid://shopify/ProductVariant/46218660511843",…,"price":"26.50"}`, and Alpha was cross-checked through the CLI's **independent** store session → `{"sku":"SKU-003","price":"26.50"}`. Central price, both stores' live prices, both sync rows and the computed flag therefore all agree, which is the phase's own deliverable working end to end. **State left behind for Phase 2:** all twenty `store_sync_status` rows are `synced` with `has_mismatch: false` across the ten SKUs, and two central prices now differ from the seeds (`SKU-001 22.00`, `SKU-002 30.00`, `SKU-003 26.50` — the last is this task's), so any later check quoting the seeded prices for those three must re-read them first.
 - **Blocks:** `T-2.1`
 
 ---
