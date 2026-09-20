@@ -30,11 +30,11 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 |---|---|---|---|
 | 0 — Environment & Store Preparation | 14 | 14 / 14 | complete |
 | 1 — Central Backend Service Development | 18 | 18 / 18 | complete |
-| 2 — Frontend Dashboard Development | 8 | 1 / 8 | in progress |
+| 2 — Frontend Dashboard Development | 8 | 2 / 8 | in progress |
 | 3 — Deployment | 7 | 0 / 7 | not started |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 33 / 53 done
+**Overall:** 34 / 53 done
 
 ## Environment variables
 
@@ -545,7 +545,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** 2026-09-20 — **verified**. `Do` step 1 run as the official scaffolder rather than by hand: `npx create-next-app@latest frontend --ts --tailwind --eslint --app --empty --use-npm --disable-git --no-agents-md --yes` → `Success! Created frontend at …/frontend`, `added 365 packages`, `found 0 vulnerabilities`. App Router + TypeScript + **Tailwind v4** (`@tailwindcss/postcss`, `app/globals.css` is the single line `@import "tailwindcss"`), and **no library beyond that**: deps are exactly `next@16.3.5`, `react@19.2.8`, `react-dom@19.2.8`, devdeps are the four `@types/*`/`tailwindcss`/`postcss`/`eslint*`/`typescript` entries. `--empty` was used so the page is a placeholder (`<main><div>Hello world!</div></main>`) instead of create-next-app's demo CSS and images — T-2.3 owns the real page, so there is nothing to delete later. `Verify` → **`200`**, from a real socket: `next dev -p 3001` logged `Ready in 356ms`, `curl -s -o /dev/null -w '%{http_code}' localhost:3001/` → `200`, and `curl -s localhost:3001/` returned a full HTML document whose `<link rel="stylesheet">` resolves to a Tailwind chunk (`/_next/static/chunks/app_globals_0yg4wg8.css` → `@layer theme { :root, :host { --font-sans: …`), so the styling base is live and not just declared. **Two deliberate deviations, both named:** (1) the `dev` script is `next dev -p 3001`, not the scaffolder's bare `next dev` — the default is port 3000, which the backend already occupies, and the `Verify` line and `docker-compose.yml`'s frontend service both specify 3001; the script is the one place that makes `npm run dev` mean the port the task asks for (`start` was left alone: Vercel supplies its own port and no task runs it locally). (2) `create-next-app` **refuses a non-empty target directory** (`The directory frontend contains files that could conflict: .dockerignore, Dockerfile`), so the two files this repo already had were moved aside for the scaffold and restored afterwards — both are tracked and `git status` shows them unmodified. `agentRules: false` was added to `frontend/next.config.ts`, with a comment: Next 16 regenerates `frontend/AGENTS.md` + `frontend/CLAUDE.md` on every dev start (it printed so on the first run), and they are not part of this project; after the change a fresh `next dev` starts with no such line and neither file exists. Confirmed also that `node_modules/`, `.next/` and `next-env.d.ts` stay untracked via the scaffold's own `frontend/.gitignore`.
 - **Blocks:** `T-2.2`, `T-2.3`
 
-### [ ] T-2.2 — Add the API client module and `NEXT_PUBLIC_API_URL`
+### [x] T-2.2 — Add the API client module and `NEXT_PUBLIC_API_URL`
 
 - **Depends on:** `T-2.1`
 - **Size:** `S`
@@ -556,7 +556,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `frontend/lib/api.ts`, `frontend/.env.example`, `frontend/.env.local`
 - **Done when:** both helpers call the backend base URL from env, and no secret is referenced client-side.
 - **Verify:** `curl -s "$NEXT_PUBLIC_API_URL/prices" | jq 'length'` → `10`; `grep -rn "SUPABASE\|SHOPIFY" frontend/lib frontend/.env.local` → no matches.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `frontend/lib/api.ts` created: one module-scope `API_URL = process.env.NEXT_PUBLIC_API_URL`, `getPrices()` checking `response.ok` before `response.json()` so an erroring backend cannot reach the table as an empty catalogue, and `updatePrice(sku, price)` sending one `PATCH` with `{"price": …}` and returning the body **as-is whatever the status** — both outcomes are readable from it, since 200 and 502 both carry `stores[]` (the per-store message T-2.7 shows) and a rejected request carries `error` instead. `frontend/.env.example` and `frontend/.env.local` both hold the literal `NEXT_PUBLIC_API_URL=http://localhost:3000` the `Do` step writes, comment-free. **One strictly-required wiring change, named because it is outside the three files this task lists:** the scaffold's `frontend/.gitignore` carries `.env*`, which swallowed `.env.example` as well, so `!.env.example` was added — without it this task's own named artifact could not be committed (`git status --ignored --short frontend/` → `?? frontend/.env.example`, `!! frontend/.env.local`). `git check-ignore -v frontend/.env.example` is **not** the check to use here: for a negated pattern it prints the `!` line and exits 0, which reads as "ignored" when the file is in fact tracked. **Verify 1** → `10`, using the value sourced from `.env.local`, so the file's own URL answers. **Verify 2** → `no matches`, exit 1. Stronger, because neither `Verify` command proves the module reads the variable: the real module was imported through Node's type stripping and both helpers were called — `/tmp/t22_check.mjs` → `getPrices() length: 10`, `row keys: sku,name,central_price,stores,has_mismatch`, `updatePrice() body: {"sku":"SKU-003","price":"26.50","stores":[{"store":"alpha","status":"synced","error":null},{"store":"beta","status":"synced","error":null}]}`, `T-2.2 CHECK PASSED`, exit 0 — and that write was **idempotent** (the price the row already held), so no store price moved. The `ok` guard is exercised rather than merely written: against a stub server answering `500` → `GET /prices failed: HTTP 500`, and against a dead port → `fetch failed`. `tsc --noEmit -p frontend/tsconfig.json` → clean, exit 0. **Carried forward:** the dev server on 3001 was started **before** `.env.local` existed and `NEXT_PUBLIC_*` is inlined at compile time, so T-2.3 must restart it or the page reads `undefined` as the base URL.
 - **Blocks:** `T-2.3`, `T-2.5`
 
 ### [ ] T-2.3 — Render the price table
