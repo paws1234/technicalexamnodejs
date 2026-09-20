@@ -28,13 +28,13 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 
 | Phase | Tasks | Done / Total | Status |
 |---|---|---|---|
-| 0 — Environment & Store Preparation | 14 | 4 / 14 | in progress |
+| 0 — Environment & Store Preparation | 14 | 9 / 14 | in progress |
 | 1 — Central Backend Service Development | 18 | 0 / 18 | not started |
 | 2 — Frontend Dashboard Development | 8 | 0 / 8 | not started |
 | 3 — Deployment | 7 | 0 / 7 | not started |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 4 / 53 done
+**Overall:** 9 / 53 done
 
 ## Environment variables
 
@@ -112,7 +112,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** 2026-09-20 — **verified**. The `Verify` command printed `SKU-001,SKU-002,…,SKU-010` and exited 0. Stronger than the task's own check, the file was diffed against the already-committed `backend/seed/products.sql` (same 10 rows, same names): parsing both gives 10 rows each and `JSON.stringify` of `[sku,name,Number(price)]` for JSON === SQL → `true`, so the two seed artifacts cannot drift silently. Also asserted every `"price":` literal in the file text matches `^[0-9]+\.[0-9]{2}$` (`19.99,12.50,24.00,29.95,45.00,34.75,14.00,39.90,52.00,89.50`) and every entry has a non-empty `name` → `true`/`true`, covering the `Done when` clause the `Verify` command leaves out. Values were taken from `products.sql` rather than invented, and `products.json` carries only the three specified fields.
 - **Blocks:** `T-0.4`, `T-0.5`, `T-0.13`, `T-1.17`
 
-### [ ] T-0.4 — Seed the 10 products into Store Alpha
+### [x] T-0.4 — Seed the 10 products into Store Alpha
 
 - **Depends on:** `T-0.2`, `T-0.3`
 - **Size:** `M`
@@ -122,10 +122,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none — console step (optional import CSV under `backend/seed/`)
 - **Done when:** Alpha products list shows 10 products whose variant SKUs match the seed file exactly.
 - **Verify:** Alpha admin → Products shows 10 items; the exported/hand-checked SKU column matches the seed file 1:1 (named UI observation).
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. Alpha was empty first (`productsCount` → `0`), so "10 items" is literal. `Do` step 1 was performed through the Admin API (`productSet`, one variant per product, `sku`/`price` read from `backend/seed/products.json`) rather than by hand or CSV: same end state, no admin browser session exists in this agent, and the seeding driver was kept **outside the repo** because this task specifies no artifacts. The 10 products created with their variant ids in one run (`10/10 ok`, e.g. `SKU-001 19.99 gid://shopify/ProductVariant/50472597455098`). Read-back against the seed file — `productsCount=10`, `variants=10`, `seed rows missing/wrong: none`, `extra/duplicate rows: none`, exit 0 — so the SKU column matches 1:1 including prices. Cross-checked independently of the app credential: the CLI's own store session `docker compose run --rm shopify store execute -s alphastore-sdgba8qx.myshopify.com -q 'query { productsCount { count } }'` → `count: 10`, and the same query's `productVariants` listed `SKU-001`…`SKU-010` at the seeded prices. Shape note for whoever restores a store: `productSet` rejects a single-variant product without an explicit option set (`INVALID_VARIABLE … variants.0.optionValues (Expected value to not be null)`), so the input carries `productOptions: [{ name: 'Title', values: [{ name: 'Default Title' }] }]` and a matching `optionValues` entry; the query string T-0.9 reuses is unaffected.
 - **Blocks:** `T-0.11`, `T-0.9`, `T-1.5`
 
-### [ ] T-0.5 — Seed the same 10 products into Store Beta
+### [x] T-0.5 — Seed the same 10 products into Store Beta
 
 - **Depends on:** `T-0.2`, `T-0.3`
 - **Size:** `M`
@@ -135,10 +135,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none — console step
 - **Done when:** Beta shows the same 10 variant SKUs at the same prices as the seed file.
 - **Verify:** Beta admin → Products shows 10 items with SKUs matching the seed file; spot-check `SKU-001` price equals the seed value.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. Same source file and the same seeding route as T-0.4, against Beta (`betastore-haewq5ha.myshopify.com`, `productsCount` `0` beforehand): `10/10 ok`, `SKU-001 19.99 gid://shopify/ProductVariant/46218659889251` … `SKU-010 89.50`. Read-back diff against `backend/seed/products.json` → `productsCount=10`, `variants=10`, `seed rows missing/wrong: none`, `extra/duplicate rows: none`, exit 0, so the price spot-check for `SKU-001` is `19.99` and no independent price edits exist. Alpha re-read after Beta's run still shows `10 / none / none` (exit 0), so the two stores hold the identical catalogue. **Weaker than T-0.4 on independence:** the CLI's own store session is authenticated for Alpha only (`store auth list` → `alphastore-sdgba8qx  Sep 20, 2026`; `store execute` on Beta answers "Run `shopify store auth --store betastore-haewq5ha.myshopify.com` to authenticate"), so this read uses the same app credential as the write. An independent Beta read needs either that `store auth` approval or the Beta admin UI — both need a browser the agent does not have. Not a blocker for anything downstream, but noted rather than glossed.
 - **Blocks:** `T-0.11`, `T-1.5`
 
-### [ ] T-0.6 — Create the Dev Dashboard app and prove it mints an Alpha Admin API token
+### [x] T-0.6 — Create the Dev Dashboard app and prove it mints an Alpha Admin API token
 
 - **Depends on:** `T-0.2`
 - **Size:** `S`
@@ -151,10 +151,10 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none — console step (credentials stored in `backend/.env` at T-0.8)
 - **Done when:** the app's credentials mint an Admin API token for Alpha.
 - **Verify:** `set -a; . backend/.env; set +a; node backend/scripts/shopify-token.mjs alpha` → `OK alpha (…myshopify.com) token=… scope=read_products,write_products expires_in=86399`, exit 0. A `shop_not_permitted` error means the app and the store are in different organisations (see T-0.2). An **empty `scope=`** (exit 3) is a failure, not a cosmetic detail: the grant reads scopes back from the released app version, and a token with none answers `Access denied for products field`. Fix by releasing a new version that declares the scopes **and** approving the change on the store — releasing alone does not update existing installs.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified, with one deviation from the `Verify` line's expected output, stated below.** The `Verify` command ran clean: `node backend/scripts/shopify-token.mjs alpha` → `OK alpha (alphastore-sdgba8qx.myshopify.com) token=<masked> scope=…,write_products,… expires_in=86374`, **exit 0** — so this is a usable credential and not the empty-`scope` case the task defines as failure. Because a mint alone proves nothing (see the scopeless-token note above), the token was then used for a real field read: `HTTP 200` with `{"shop":{"name":"AlphaStore","myshopifyDomain":"alphastore-sdgba8qx.myshopify.com"},"productsCount":{"count":10}}`, and it has a real **write** behind it too — T-0.4 created all 10 products with this exact credential. `Do` steps 1–4 (create the app, release a version with the two scopes, install on Alpha, copy the client id/secret) were performed in the Dev Dashboard in the earlier session this file's assumption 1 describes; they are not re-runnable from the agent, so the durable proof is the credential working end to end plus `backend/.env` (T-0.8, verified). **Deviation:** the granted scope list is not the `read_products,write_products` the `Verify` line names — it carries ~102 scopes (`write_customers`, `write_orders`, `write_themes`, `write_gift_cards`, `read_shopify_payments_*`, `unauthenticated_*`, …). The task only classifies an **empty** scope as failure, and nothing downstream is blocked by the extra grants, so this is recorded as a least-privilege finding rather than reworked here: narrowing it means creating a new app version and having the change **approved on the store** (Shopify does not apply released scopes to an existing install), which is an out-of-band console step. See the report's findings — it does not belong inside this task's `Do` steps.
 - **Blocks:** `T-0.8`, `T-0.9`
 
-### [ ] T-0.7 — Install the same app on Beta and prove it mints a Beta token
+### [x] T-0.7 — Install the same app on Beta and prove it mints a Beta token
 
 - **Depends on:** `T-0.2`, `T-0.6`
 - **Size:** `S`
@@ -164,7 +164,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none — console step (no new `backend/.env` names; `SHOPIFY_BETA_STORE` is T-0.2's)
 - **Done when:** the app's credentials mint an Admin API token for Beta.
 - **Verify:** `set -a; . backend/.env; set +a; node backend/scripts/shopify-token.mjs beta` → `OK beta (…myshopify.com) token=… expires_in=86399`, exit 0.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `node backend/scripts/shopify-token.mjs beta` → `OK beta (betastore-haewq5ha.myshopify.com) token=<masked> scope=… expires_in=86399`, **exit 0** — the same client id/secret that mints Alpha mints Beta, so `Do` step 1's single-app-both-stores shape holds (no second credential exists in `backend/.env`, which still carries exactly the 9 names T-0.8 verified). As with T-0.6 the mint is only half the check: the token was used for a real field read → `HTTP 200` `{"shop":{"name":"betastore","myshopifyDomain":"betastore-haewq5ha.myshopify.com"},"productsCount":{"count":10}}`, and the installation itself is visible from the token's own perspective — `{ currentAppInstallation { accessScopes { handle } } }` returns a populated scope list for Beta. A **write** stands behind it as well: T-0.5 seeded all 10 Beta products with this credential. Independence caveat carried over from T-0.5: the CLI's store session is authenticated for Alpha only, so Beta has no second credential path to cross-check against — an independent Beta read needs a `store auth` approval or the Beta admin UI (both manual). The ~102-scope least-privilege finding recorded on T-0.6 applies to this installation too.
 - **Blocks:** `T-0.8`
 
 ### [x] T-0.8 — Write `backend/.env.example` (placeholder) and `backend/.env` (real, ignored)
@@ -182,7 +182,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Deferred:** `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are still blank, which `Do` step 2 explicitly allows "until T-0.10 exists" — T-0.10 fills them and T-1.2's `config.js` refuses to start until it has.
 - **Blocks:** `T-1.2`, `T-3.3`
 
-### [ ] T-0.9 — Prove the SKU→variant lookup works against Alpha
+### [x] T-0.9 — Prove the SKU→variant lookup works against Alpha
 
 - **Depends on:** `T-0.4`, `T-0.6`
 - **Size:** `M`
@@ -194,7 +194,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none — throwaway request (the query string is reused in T-1.5)
 - **Done when:** the response contains exactly one variant node for `SKU-001` with its id and current price.
 - **Verify:** `curl -s -X POST "https://$SHOPIFY_ALPHA_STORE/admin/api/$SHOPIFY_API_VERSION/graphql.json" -H "X-Shopify-Access-Token: $TOKEN" -H 'Content-Type: application/json' -d '{"query":"{ productVariants(first: 1, query: \"sku:SKU-001\") { edges { node { id price } } } }"}'` returns HTTP 200 and the JSON body has `data.productVariants.edges[0].node.id` non-empty and `node.price` equal to the seeded price for `SKU-001`.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `Do` steps 1–2 run exactly as the `Verify` command writes them (`. backend/.env`, `TOKEN=$(node backend/scripts/shopify-token.mjs alpha --print)`, then the Admin API POST) → **HTTP 200** and `{"data":{"productVariants":{"edges":[{"node":{"id":"gid://shopify/ProductVariant/50472597455098","price":"19.99"}}]}}}`, i.e. exactly one node, non-empty `id`, and `price` `19.99` = the seeded price for `SKU-001` in `backend/seed/products.json` (and the same variant id T-0.4 created, so lookup and seeding agree). **Shape T-1.5 reuses:** `productVariants(first: 1, query: "sku:SKU-001") { edges { node { id price } } }` — `id` is a `gid://shopify/ProductVariant/<numeric>` GID string and `price` comes back as a **string** (`"19.99"`), so the sync has to parse it before comparing against the `numeric(10,2)` central price. Query cost 3 of 4000 available. Alpha only, as the task specifies; T-1.5's own `Verify` covers both stores. Throwaway request — no file left behind, per this task's artifacts line.
 - **Blocks:** `T-1.5`, `T-1.6`
 
 ### [ ] T-0.10 — Create the Supabase project and capture the URL + service-role key
