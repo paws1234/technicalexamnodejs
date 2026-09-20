@@ -151,7 +151,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
   4. **Settings** → copy **Client ID** and **Client secret**; they become `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` in `backend/.env` at T-0.8 (one app covers both stores).
 - **Files / artifacts:** none — console step (credentials stored in `backend/.env` at T-0.8)
 - **Done when:** the app's credentials mint an Admin API token for Alpha.
-- **Verify:** `set -a; . backend/.env; set +a; node backend/scripts/shopify-token.mjs alpha` → `OK alpha (…myshopify.com) token=… scope=write_products expires_in=86399`, exit 0. A `shop_not_permitted` error means the app and the store are in different organisations (see T-0.2).
+- **Verify:** `set -a; . backend/.env; set +a; node backend/scripts/shopify-token.mjs alpha` → `OK alpha (…myshopify.com) token=… scope=read_products,write_products expires_in=86399`, exit 0. A `shop_not_permitted` error means the app and the store are in different organisations (see T-0.2). An **empty `scope=`** (exit 3) is a failure, not a cosmetic detail: the grant reads scopes back from the released app version, and a token with none answers `Access denied for products field`. Fix by releasing a new version that declares the scopes **and** approving the change on the store — releasing alone does not update existing installs.
 - **Evidence:** `-`
 - **Blocks:** `T-0.8`, `T-0.9`
 

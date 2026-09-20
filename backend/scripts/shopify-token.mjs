@@ -99,3 +99,22 @@ if (printOnly) {
       `scope=${parsed.scope} expires_in=${parsed.expires_in}`,
   );
 }
+
+// An empty `scope` is not cosmetic. The client credentials grant reads the scopes back
+// from the app version that was released, so an empty list means this token can do
+// nothing at all. Measured 2026-09-20: a token minted with `scope=` came back
+// `Access denied for products field` (ACCESS_DENIED) — the mint had looked successful.
+// Exiting non-zero keeps T-0.6's "exit 0" meaningful: it is meant to prove a *usable*
+// credential, not merely a mint.
+if (!parsed.scope) {
+    console.error(
+        [
+            '',
+            'WARNING: the token response carried no scopes, so this token cannot read or write anything.',
+            'The app version that was released must declare read_products + write_products, and releasing',
+            'new scopes does not apply them to existing installs — the change must also be approved on the',
+            'store. See task.md T-0.6.',
+        ].join('\n'),
+    );
+    process.exit(3);
+}
