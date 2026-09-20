@@ -28,13 +28,13 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 
 | Phase | Tasks | Done / Total | Status |
 |---|---|---|---|
-| 0 — Environment & Store Preparation | 14 | 2 / 14 | in progress |
+| 0 — Environment & Store Preparation | 14 | 3 / 14 | in progress |
 | 1 — Central Backend Service Development | 18 | 0 / 18 | not started |
 | 2 — Frontend Dashboard Development | 8 | 0 / 8 | not started |
 | 3 — Deployment | 7 | 0 / 7 | not started |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 2 / 53 done
+**Overall:** 3 / 53 done
 
 ## Environment variables
 
@@ -167,7 +167,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** `-`
 - **Blocks:** `T-0.8`
 
-### [~] T-0.8 — Write `backend/.env.example` (placeholder) and `backend/.env` (real, ignored)
+### [x] T-0.8 — Write `backend/.env.example` (placeholder) and `backend/.env` (real, ignored)
 
 - **Depends on:** `T-0.6`, `T-0.7`
 - **Size:** `S`
@@ -178,8 +178,8 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `backend/.env.example`, `backend/.env`
 - **Done when:** both files list all 9 backend variables and `.env` is ignored by git.
 - **Verify:** `git check-ignore -v backend/.env` → prints the ignore rule; `cut -d= -f1 backend/.env.example | sort` → all 9 names from the Env vars table.
-- **Evidence:** 2026-09-20 — files created at the user's explicit request, ahead of `T-0.6`/`T-0.7`. Both structural checks pass: `git check-ignore -v backend/.env` → `.gitignore:2:.env       backend/.env` (exit 0), and `cut -d= -f1 backend/.env.example | sort` → exactly the 9 Env-vars-table names (count 9), with the same 9 names present in `backend/.env`. `git status --short -uall` lists only `?? backend/.env.example` while `git status --ignored backend/` lists `!! backend/.env`. `SHOPIFY_API_VERSION` pinned to `2026-07`, confirmed "Latest stable" (accessible until 2027-07-16) on `shopify.dev/docs/api/usage/versioning`. Left `[~]`: six values in `backend/.env` are still blank — two of them secret (`SUPABASE_SERVICE_ROLE_KEY`, `SHOPIFY_CLIENT_SECRET`) and four not (`SUPABASE_URL`, both store domains, `SHOPIFY_CLIENT_ID`) — so `Do` step 2 is unsatisfied. Renamed 2026-09-20: `SHOPIFY_ALPHA_TOKEN`/`SHOPIFY_BETA_TOKEN` became `SHOPIFY_CLIENT_ID`/`SHOPIFY_CLIENT_SECRET` (still 9 backend names), because admin-created custom apps can no longer be created — see assumption 1.
-- **Remaining:** user fills the six blanks in `backend/.env` (the Supabase URL, both store domains and the client id are safe to share here; the two secrets are pasted by hand), then re-run `Verify` to close it.
+- **Evidence:** 2026-09-20 — files created at the user's explicit request, ahead of `T-0.6`/`T-0.7`. Both structural checks pass: `git check-ignore -v backend/.env` → `.gitignore:2:.env       backend/.env` (exit 0), and `cut -d= -f1 backend/.env.example | sort` → exactly the 9 Env-vars-table names (count 9), with the same 9 names present in `backend/.env`. `git status --short -uall` lists only `?? backend/.env.example` while `git status --ignored backend/` lists `!! backend/.env`. `SHOPIFY_API_VERSION` pinned to `2026-07`, confirmed "Latest stable" (accessible until 2027-07-16) on `shopify.dev/docs/api/usage/versioning`. Left `[~]`: six values in `backend/.env` are still blank — two of them secret (`SUPABASE_SERVICE_ROLE_KEY`, `SHOPIFY_CLIENT_SECRET`) and four not (`SUPABASE_URL`, both store domains, `SHOPIFY_CLIENT_ID`) — so `Do` step 2 is unsatisfied. Renamed 2026-09-20: `SHOPIFY_ALPHA_TOKEN`/`SHOPIFY_BETA_TOKEN` became `SHOPIFY_CLIENT_ID`/`SHOPIFY_CLIENT_SECRET` (still 9 backend names), because admin-created custom apps can no longer be created — see assumption 1. **Closed 2026-09-20** after the four non-Supabase blanks were filled: both `Verify` commands re-run, `git check-ignore -v backend/.env` → `.gitignore:2:.env       backend/.env` (exit 0) and `cut -d= -f1 backend/.env.example | sort` → the 9 Env-vars names, the name-set `diff` against `grep -E '^[A-Z_]+=' backend/.env | cut -d= -f1 | sort` empty (identical lists). The four Shopify values are real rather than `.env.example` placeholders (checked per-name without printing values), and the nearest live proof is `node backend/scripts/shopify-token.mjs alpha` then `beta` → `OK … token=<masked> scope=read_analytics,…,write_products expires_in=86399`, exit 0 each — so the store domains and client id/secret in the file are genuine and usable. Also corrected the file's own header comment, which still claimed six blanks below it.
+- **Deferred:** `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are still blank, which `Do` step 2 explicitly allows "until T-0.10 exists" — T-0.10 fills them and T-1.2's `config.js` refuses to start until it has.
 - **Blocks:** `T-1.2`, `T-3.3`
 
 ### [ ] T-0.9 — Prove the SKU→variant lookup works against Alpha
