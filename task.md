@@ -28,13 +28,13 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 
 | Phase | Tasks | Done / Total | Status |
 |---|---|---|---|
-| 0 — Environment & Store Preparation | 14 | 13 / 14 | in progress |
+| 0 — Environment & Store Preparation | 14 | 14 / 14 | complete |
 | 1 — Central Backend Service Development | 18 | 0 / 18 | not started |
 | 2 — Frontend Dashboard Development | 8 | 0 / 8 | not started |
 | 3 — Deployment | 7 | 0 / 7 | not started |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 13 / 53 done
+**Overall:** 14 / 53 done
 
 ## Environment variables
 
@@ -274,7 +274,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Evidence:** 2026-09-20 — **verified**. `Do` step 1's artifact `backend/seed/products.sql` was already complete (its 10 rows were taken from `products.json` at T-0.3 and proved row-for-row identical there), so the work was running it: `psql -w -v ON_ERROR_STOP=1 -f /seed/products.sql` → `INSERT 0 10`, exit 0. Restated `Verify` → `10`, exit 0. Stronger than the count, and covering the `Done when` line's "exactly the 10 seeded SKUs with their central prices": `select sku, name, price from products order by sku` rendered as CSV and diffed against the same three fields built from `backend/seed/products.json` → `IDENTICAL (exit 0)`, so the cloud rows match the checked-in seed 1:1 on sku, name and 2-decimal price. `10` is the expected count and not a lower bound because T-0.11's pre-flight proved the table was empty beforehand.
 - **Blocks:** `T-1.3`, `T-1.9`, `T-1.17`
 
-### [ ] T-0.14 — Phase 0 smoke test — both stores and the database are reachable with the documented credentials
+### [x] T-0.14 — Phase 0 smoke test — both stores and the database are reachable with the documented credentials
 
 - **Depends on:** `T-0.6`, `T-0.7`, `T-0.9`, `T-0.13`
 - **Size:** `S`
@@ -284,7 +284,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** none
 - **Done when:** all four checks pass together using only the variables in `backend/.env`.
 - **Verify:** `node backend/scripts/shopify-token.mjs alpha` and `node backend/scripts/shopify-token.mjs beta` → exit 0 each, `SKU-001` variant node returned on both stores, `products` returns 10 rows.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified**. `Do` step 1 ran as one combined check whose only inputs are the names in `backend/.env` (the smoke-test driver was kept **outside the repo**, in `/tmp`, because this task's artifacts line says *none*): `mint alpha: exit 0`, `mint beta: exit 0`, then the SKU-001 lookup against both stores — `SKU-001 alpha: HTTP 200 id=gid://shopify/ProductVariant/50472597455098 price=19.99` and `SKU-001 beta: HTTP 200 id=gid://shopify/ProductVariant/46218659889251 price=19.99` — and `products count: 10`, ending `PHASE 0 SMOKE TEST PASSED`, **exit 0**. The variant ids are the same ones T-0.4/T-0.5 created and the price is the seeded value for `SKU-001`, so lookup, seeding and the central table agree; the count was taken over the pooler with the file's own `PG*` values (`docker run --rm --env-file backend/.env postgres:16 psql -w -t -A -c "select count(*) from products"`). The driver treats a non-`200`, a missing `id`, a price other than the seeded `19.99` or a count other than `10` as a failure and exits non-zero, so a green run is not just four commands having been typed. Four checks, four green — the phase is prepared.
 - **Blocks:** `T-1.1`
 
 ---
