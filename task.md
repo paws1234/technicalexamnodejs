@@ -31,10 +31,10 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | 0 — Environment & Store Preparation | 14 | 14 / 14 | complete |
 | 1 — Central Backend Service Development | 18 | 18 / 18 | complete |
 | 2 — Frontend Dashboard Development | 8 | 8 / 8 | complete |
-| 3 — Deployment | 7 | 1 / 7 | in progress |
+| 3 — Deployment | 7 | 2 / 7 | in progress |
 | 4 — End-to-end acceptance | 6 | 0 / 6 | not started |
 
-**Overall:** 41 / 53 done
+**Overall:** 42 / 53 done
 
 ## Environment variables
 
@@ -641,7 +641,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 
 ## Phase 3 — Deployment
 
-### [ ] T-3.1 — Create the GitHub repo and push both apps
+### [x] T-3.1 — Create the GitHub repo and push both apps
 
 - **Depends on:** `T-0.1`, `T-2.8`
 - **Size:** `S`
@@ -651,7 +651,7 @@ it is minted per store at runtime and cached until it expires (T-1.5).
 - **Files / artifacts:** `.git/`, remote repo
 - **Done when:** the remote holds both apps and no secrets.
 - **Verify:** `git ls-files | grep -E '(^|/)\.env$'` → no output; `gh repo view --json name,visibility` reports the repo.
-- **Evidence:** `-`
+- **Evidence:** 2026-09-20 — **verified; the `Do` step had already been performed by the owner, so this task's work was the verification, not the push.** The remote exists — `origin https://github.com/paws1234/technicalexamnodejs.git`, branch `main` tracking `origin/main`, working tree **clean**, and `HEAD` (`19bfe76`) is the same commit as `origin/main` — so both apps are pushed and nothing local is outstanding. `Verify` → command 1, `git ls-files | grep -E '(^|/)\.env$'`, printed **no output**; command 2, `gh repo view paws1234/technicalexamnodejs --json name,visibility,defaultBranchRef` → `{"defaultBranchRef":{"name":"main"},"name":"technicalexamnodejs","visibility":"PUBLIC"}`. **Strengthened, because the `Verify` regex only matches a file named exactly `.env`** and would have missed `.env.local` and any `.env.*`: a wider `git ls-files | grep -E '\.env'` lists **only the three committed templates** (`.env.example`, `backend/.env.example`, `frontend/.env.example` — all placeholder-only), and `git status --ignored --short` shows the three real files as `!!` (`.env`, `backend/.env`, `frontend/.env.local`), so none of them is in the tree and `Done when`'s "no secrets" holds for the wider pattern rather than just the one filename the command names. "The remote holds both apps" was read off the **pushed commit** instead of the working tree — `git ls-tree -r --name-only origin/main` → **21 files under `backend/`** and **17 under `frontend/`** (plus `docker-compose.yml`, `plan.md`, `task.md`, `README.md`, `.gitignore`, `tools/`) — so the API and the dashboard are both on GitHub, which is what T-3.3/T-3.5 will build from. Recorded rather than changed: the repo is **PUBLIC** — the task fixes no visibility and the tree is secret-free, so it is an observation, not a defect. This task's own dependencies were re-checked in the same pass: T-0.1 `git check-ignore -v backend/node_modules .env frontend/.next` → the three ignore rules (`.gitignore:1:node_modules`, `.gitignore:2:.env`, `frontend/.gitignore:17:/.next/`), exit 0; and T-2.8's dashboard re-measured at **1280px and 375px** → 10 rows / 10 Update buttons / 20 badges, **no horizontal overflow** at either width. T-3.1 was the last code-only task in Phase 3; everything after it (T-3.3 onward) needs the Vercel dashboard, and the `vercel` CLI is not installed here, so those stay `needs manual`.
 - **Blocks:** `T-3.3`, `T-3.5`
 
 ### [x] T-3.2 — Add the Vercel serverless entry for the Express app
