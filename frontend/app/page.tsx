@@ -3,6 +3,7 @@ import StatusBadge from '@/components/StatusBadge';
 import PriceEditor from '@/components/PriceEditor';
 import ProductEditor from '@/components/ProductEditor';
 import ProductImage from '@/components/ProductImage';
+import DriftResolver from '@/components/DriftResolver';
 
 // One grid serves both widths: `lg:contents` dissolves each label/value wrapper at the breakpoint, so
 // a phone and a tablet see labelled lines and a wide screen sees eight aligned columns — a fixed
@@ -17,14 +18,18 @@ const LABEL = 'text-xs uppercase tracking-wide text-gray-500 lg:hidden';
 // A store entry can be absent — the endpoint reports `stores: {}` for a SKU no store has reported
 // on — so the cells read it optionally rather than crashing on the one row that has no status yet.
 // `image` is null for a SKU with no stored image, which is what the thumbnail's placeholder is for.
+// `live_price` is what the store was read holding on this request, which is what the resolver offers
+// as the alternative to the central price. `has_mismatch` is the backend's own verdict and is what
+// decides whether the row gets a resolver, so the rule lives in one place.
 type PriceRow = {
   sku: string;
   name: string;
   central_price: string;
   image: { sha256: string; bytes: number } | null;
+  has_mismatch: boolean;
   stores: {
-    alpha?: { status: string; error?: string | null };
-    beta?: { status: string; error?: string | null };
+    alpha?: { status: string; live_price?: string | null; error?: string | null };
+    beta?: { status: string; live_price?: string | null; error?: string | null };
   };
 };
 
@@ -41,7 +46,7 @@ export default async function Home() {
     <main className="mx-auto max-w-5xl p-4 lg:p-8">
       <h1 className="text-lg font-semibold">Central Price Sync</h1>
       <p className="mb-4 text-sm text-gray-600">
-        {prices.length} SKUs — central price and each store&apos;s last known state.
+        {prices.length} SKUs — central price and what each store holds now.
       </p>
 
       <div className={`hidden lg:grid border-b border-gray-300 pb-1 text-xs uppercase tracking-wide text-gray-500 ${COLS}`}>
@@ -81,6 +86,9 @@ export default async function Home() {
               <span className={LABEL}>Update</span>
               <PriceEditor sku={p.sku} price={p.central_price} />
             </div>
+            {/* Only on a row the backend flagged, and above the editor: the two prices in front of
+                the operator already disagree, so the decision comes before another manual entry. */}
+            {p.has_mismatch && <DriftResolver sku={p.sku} central={p.central_price} stores={p.stores} />}
             {/* A grid child of the row rather than of a cell, so its editor spans the full width
                 below the row instead of the 11rem action column. */}
             <ProductEditor sku={p.sku} name={p.name} imageSize={p.image?.bytes ?? null} />

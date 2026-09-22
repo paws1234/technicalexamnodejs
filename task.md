@@ -35,8 +35,9 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | 4 — End-to-end acceptance | 6 | 6 / 6 | complete |
 | 5 — Product images | 3 | 3 / 3 | complete |
 | 6 — Images & product details in the dashboard | 4 | 4 / 4 | complete |
+| 7 — Drift resolution in the dashboard | 1 | 1 / 1 | complete |
 
-**Overall:** 61 / 61 done
+**Overall:** 62 / 62 done
 
 ## Environment variables
 
@@ -964,4 +965,22 @@ filled.
 - **Done when:** ten parallel thumbnail requests all answer `200` against the deployed alias, and a cached image is served without invoking the function.
 - **Verify:** the live alias returns `cache-control: public, max-age=31536000, immutable` on `/images/:sku`, ten parallel `GET`s return ten `200`s, a repeat is an `x-vercel-cache: HIT`, and `/prices` plus `/` answer `200`.
 - **Evidence:** 2026-09-22 — **verified.** The live logs named the cause exactly: `GET /images/SKU-009 … (EMAXCONNSESSION) max clients reached in session mode - max clients are limited to pool_size: 15` from `getImage`, and the same from `listPrices` on `/prices`. **Reproduced:** ten parallel requests to the live `/images/:sku` returned `500 500 200 200 200 500 500 500 500 200` (6 failures), a second burst 3, `/prices` + ten images 6 of 11, and twenty parallel 13 of 20 — the failures land on whichever request is the sixteenth client, which is why it looked random and partial. **Cost of one page view measured before the fix:** 1 (`/prices`) + 10 (thumbnails) = 11 connections, every time, because the response was `no-cache` (`age: 0`, `x-vercel-cache: MISS`). Two causes: (a) the images were uncacheable, so every page view re-queried them; (b) the deployment held **sessions** — a frozen serverless instance never runs node-postgres's idle timer, so its connection stayed open until the tenant's fifteen slots were gone. **Fix, part 1 (code):** `Cache-Control: public, max-age=31536000, immutable` — safe because the URL carries the row's `sha256`, so a replaced image is a *new* URL and nothing can go stale — plus `loading="lazy"`. **Fix, part 2 (config):** the app was run locally over the transaction port (`PGPORT=6543`) before touching production: `listPrices` returned 10 rows, `getImage('SKU-001')` returned 315677 bytes, and **10 parallel image GETs returned 10 × 200** — the app uses no prepared statements, cursors or session state, so transaction pooling is fully compatible. `PGPORT` was then set to `6543` in the **Vercel production** env (12 names before and after) and redeployed. **After:** the alias reports `cache-control: public, max-age=31536000, immutable`; three bursts (10, 10 and 20 parallel requests) returned **40 × 200, 0 failures**; a repeat request is `x-vercel-cache: HIT` (`age: 79`) with no function invocation; `/prices` → `200`; `/` → `200` with `10` thumbnails and `10` editor rows. **Local `.env` deliberately keeps `PGPORT=5432`:** the psql recipes in this file use multi-statement sessions (`begin; … rollback;`), which transaction pooling cannot keep on one backend — so local development stays on session mode and only the serverless deployment moved.
+- **Blocks:** none
+
+---
+
+## Phase 7 — Drift resolution in the dashboard (added 2026-09-22, after Phase 6)
+
+### [x] T-7.1 — Let the operator settle a drifted row in one click
+
+- **Depends on:** `T-1.10`, `T-2.7`
+- **Size:** `M`
+- **Why:** the live read (T-1.10, amended) made drift *visible*, but settling it still meant typing the price by hand. Which value is right is the operator's decision, so both answers have to be one click away: keep the central price, or accept what a store holds.
+- **Do:**
+  1. Add `frontend/components/DriftResolver.tsx`: for a row the backend flagged, name the store(s) that disagree and the prices involved, and offer `Keep central (<price>)` plus `Use <store> (<live price>)` for every store whose price was actually read.
+  2. Render it from `frontend/app/page.tsx` on `has_mismatch` rows only, above the editor, and add `has_mismatch` and each store's `live_price` to the row type.
+- **Files / artifacts:** `frontend/components/DriftResolver.tsx`, `frontend/app/page.tsx`
+- **Done when:** a drifted row offers both resolutions, and either one leaves both stores holding the chosen price.
+- **Verify:** with a store edited directly in a Shopify admin, the dashboard shows the resolver on that row only; `Use <store>` sets the central price to the store's value and syncs both stores; `Keep central` writes the central price back to the drifted store; `/prices` flags `0` afterwards.
+- **Evidence:** 2026-09-22 — **verified**, both resolutions, against live stores. **No backend change was needed:** adopting a store's price is the same `PATCH /prices/:sku` with that value, so a resolution travels the path a manual edit already takes (central first, then both stores) — and both stores end level whichever button is pressed. `DriftResolver.tsx` is a client component rendered only on a `has_mismatch` row (that flag is the backend's own verdict, so the rule lives in one place), and it offers no "use" button for a store whose price could not be read. **Adopt, on the drift already present** (`SKU-010`, Alpha `99.51` against central `89.51`): the row rendered `Out of step: Store A holds 99.51 — central is 89.51. Which price should both stores follow?` with `Keep central (89.51)` and `Use Store A (99.51)`; clicking `Use Store A` → `PATCH` → `/prices` `flagged 0` and `SKU-010 central 99.51 | A synced 99.51 | B synced 99.51`, i.e. accepting one store's price reached the other store as well. **Keep central:** a fresh drift was made with a direct store-side write (`beta SKU-007` `14.00 → 20.00` through `updateVariantPrice`, outside the central route — which is what a manual admin edit looks like to this system); the row showed `Store B holds 20.00 — central is 14.00`, and clicking `Keep central (14.00)` → `flagged 0`, `SKU-007 central 14.00 | A synced 14.00 | B synced 14.00`, so no price moved and the check is repeatable. **Unreadable store:** with `SHOPIFY_BETA_STORE` pointed at a non-existent host locally the box reads `Store B could not be read (token request for beta failed: HTTP 404 …)` and offers **only** `Keep central` — there is no live value to adopt — while the red `failed` badge stays. All three states were looked at in a browser (row-scoped screenshots), and the resolver appeared on the flagged row only: one box across ten rows in the normal case. `tsc --noEmit` clean; `next build` green with `/` still `ƒ (Dynamic)`. **Data left as found:** the adopt test was reverted (`SKU-010` back to `89.51` centrally and on both stores) and the Beta drift was resolved back to `14.00`, so the run ends `/prices` `flagged 0` with every row `synced`.
 - **Blocks:** none

@@ -224,6 +224,12 @@ cannot be read is reported as `failed` on every row with the error attached, and
 a `200`, because the catalogue itself is available. A price changed directly in a Shopify admin is
 therefore flagged on the next page load.
 
+A flagged row is also **actionable**. The dashboard renders a *drift resolver* on it — *Store A holds
+99.51, central is 89.51* — offering `Keep central` or `Use Store A`. Which of the two prices is right
+is a business decision rather than a technical one, so the operator makes it; both options are the
+same `PATCH`, so both stores end up holding whichever was chosen. A store whose read failed offers no
+"use" option, because there is nothing to adopt.
+
 `node backend/scripts/refresh-status.js` still exists, and still reads each store live, but its job
 has narrowed: it keeps the *recorded* log (`store_sync_status` and its `last_synced_at`) level with
 the stores instead of making the dashboard correct. It sends no price anywhere, so running it is

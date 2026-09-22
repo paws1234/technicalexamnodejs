@@ -56,6 +56,13 @@ change does not rewrite the media `alt` already on a store — that text is set 
 uploaded, and the image sync matches "the product's existing image" rather than the name, so a rename
 cannot cause a duplicate upload.
 
+A row whose stores disagree is not left for the operator to retype. `GET /prices` flags it, and the
+dashboard renders a **drift resolver** on that row — *Store A holds 99.51, central is 89.51* — with
+`Keep central (…)` and `Use Store A (…)`. Both options are the same `PATCH /prices/:sku` with a
+different value, so whichever is chosen the two stores end up holding it: the central price moves
+only when the operator chooses to adopt a store's value. A store that could not be read offers no
+"use" button, because there is nothing to adopt.
+
 ## Run it locally with Docker
 
 `docker compose up --build` needs nothing but Docker. Supabase + Vercel stay the deployment path
