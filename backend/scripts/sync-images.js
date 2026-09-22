@@ -9,7 +9,7 @@
 // second run is the verification pass, on a fresh read from each store rather than this run's output.
 import assert from 'node:assert/strict';
 import { pool } from '../src/db.js';
-import { ensureImage, mentions, pickBest, searchTerms } from '../src/images.js';
+import { ensureImage, imageFilename, mentions, pickBest, searchTerms, sniffImageType } from '../src/images.js';
 import { listPrices } from '../src/queries.js';
 import { addProductImage, findVariantBySku, productMedia, waitForMedia } from '../src/shopify.js';
 import { stores } from '../src/stores.js';
@@ -56,6 +56,15 @@ function selfCheck() {
   assert.equal(pickBest([insulator, flask], 'insulated bottle'), flask, 'a title match beats a tag-only one');
   assert.equal(pickBest([lens], 'insulated bottle'), null, 'no match is null, not a wrong photo');
 
+  // The upload route sniffs the magic bytes of whatever the dashboard sends, so the formats it can
+  // accept are asserted rather than trusted.
+  assert.equal(sniffImageType(Buffer.from('ffd8ffdb', 'hex')), 'image/jpeg');
+  assert.equal(sniffImageType(Buffer.from('89504e470d0a1a0a0000000d', 'hex')), 'image/png');
+  assert.equal(sniffImageType(Buffer.from('474946383961', 'hex')), 'image/gif');
+  assert.equal(sniffImageType(Buffer.from('524946462400000057454250565038', 'hex')), 'image/webp');
+  assert.equal(sniffImageType(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>')), null, 'svg is not an image the store takes');
+  assert.equal(imageFilename('Wool Felt Coasters (4-pack)', 'image/webp'), 'wool-felt-coasters-4-pack.webp');
+
   console.log('self-check ok: search terms + result matching');
 }
 
@@ -71,10 +80,7 @@ let failures = 0;
 for (const { sku, name } of rows) {
   try {
     const image = await ensureImage(sku, name, SEARCH_PHRASES[sku] ?? null);
-    // The extension follows the type the provider actually served: the file name survives into the
-    // store's image URL, and the provider does mix formats (SKU-006 is WebP).
-    const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[image.content_type] ?? 'jpg';
-    const filename = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}.${extension}`;
+    const filename = imageFilename(name, image.content_type);
     console.log(
       `${sku} ${JSON.stringify(name)} <- "${image.search_term}" ${(image.bytes.length / 1024).toFixed(0)}KB ` +
         `${image.license}${image.creator ? ` by ${image.creator}` : ''} sha256:${image.sha256.slice(0, 12)}`,
@@ -82,10 +88,10 @@ for (const { sku, name } of rows) {
 
     for (const store of stores) {
       const { productId } = await findVariantBySku(sku, store);
-      // Matched on the alt text, which is the product name. An image that is attached but still
-      // processing is waited for rather than replaced — a second one would be a duplicate, and the
-      // store decides when it is READY.
-      const held = (await productMedia(store, productId)).find((node) => node.alt === name);
+      // The product's existing image, whatever its status: this project keeps exactly one per
+      // product, so the check is "is there one" rather than "is there one called what I expect".
+      // Matching on the alt text (the product name) would re-upload for every renamed product.
+      const held = (await productMedia(store, productId)).find((node) => node.mediaContentType === 'IMAGE');
       if (held?.status === 'READY') {
         outcomes.push(`${sku} ${store.key}: already READY`);
         continue;

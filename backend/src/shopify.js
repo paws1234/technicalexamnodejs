@@ -119,6 +119,57 @@ export async function updateVariantPrice(store, { variantId, productId }, price)
   return variant.price;
 }
 
+// The product's title is the same field the dashboard shows as the item name, so an edit there has
+// to reach the store or the two disagree about what the product is called.
+export async function updateProductTitle(store, productId, title) {
+  const result = (
+    await adminGraphql(
+      store,
+      `mutation ($product: ProductUpdateInput!) {
+        productUpdate(product: $product) {
+          product { id title }
+          userErrors { field message }
+        }
+      }`,
+      { product: { id: productId, title } },
+    )
+  ).productUpdate;
+
+  if (result.userErrors?.length) {
+    throw new Error(
+      `${store.key}: title update rejected for ${productId}: ${JSON.stringify(result.userErrors).slice(0, 300)}`,
+    );
+  }
+  return result.product?.title;
+}
+
+// Renaming a variant's SKU goes through the same bulk mutation as the price, and the SKU is not a
+// field of the variant input itself — it lives on the variant's inventory item, which is why it is
+// nested. `sku` comes back from the store so the caller reports what the store now holds.
+export async function updateVariantSku(store, { variantId, productId }, sku) {
+  const data = await adminGraphql(
+    store,
+    `mutation ($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+        productVariants { id sku }
+        userErrors { field message }
+      }
+    }`,
+    { productId, variants: [{ id: variantId, inventoryItem: { sku } }] },
+  );
+
+  const result = data.productVariantsBulkUpdate;
+  if (result.userErrors?.length) {
+    throw new Error(
+      `${store.key}: sku update rejected for ${variantId}: ${JSON.stringify(result.userErrors).slice(0, 300)}`,
+    );
+  }
+
+  const variant = result.productVariants?.[0];
+  if (!variant) throw new Error(`${store.key}: sku update for ${variantId} returned no variant`);
+  return variant.sku;
+}
+
 // The inline fragment is what reaches the `image` field: `media` returns the `Media` interface,
 // which has no `image` of its own.
 export async function productMedia(store, productId) {
@@ -218,4 +269,26 @@ export async function addProductImage(store, productId, { filename, bytes, conte
     if (!created) throw new Error(`${store.key}: product ${productId} did not report the new media`);
 
     return waitForMedia(store, productId, created.id);
+}
+
+// `productDeleteMedia` is gone in API version 2026-07 too: `fileDelete` removes the media file and
+// leaves the product with no media, which is what replacing an image needs before the new one lands.
+export async function deleteMediaFiles(store, fileIds) {
+  const result = (
+    await adminGraphql(
+      store,
+      `mutation ($fileIds: [ID!]!) {
+        fileDelete(fileIds: $fileIds) {
+          deletedFileIds
+          userErrors { field message }
+        }
+      }`,
+      { fileIds },
+    )
+  ).fileDelete;
+
+  if (result.userErrors?.length) {
+    throw new Error(`${store.key}: media delete rejected: ${JSON.stringify(result.userErrors).slice(0, 300)}`);
+  }
+  return result.deletedFileIds;
 }

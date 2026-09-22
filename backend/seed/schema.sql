@@ -9,10 +9,11 @@ create table if not exists products (
 );
 
 -- Per-store, per-SKU live price and sync health. `GET /prices` compares the row here
--- against products.price to decide has_mismatch.
+-- against products.price to decide has_mismatch. `on update cascade` is what lets the
+-- dashboard rename a SKU: the sync log and the stored image follow the product.
 create table if not exists store_sync_status (
   store          text          not null,
-  sku            text          not null references products (sku) on delete cascade,
+  sku            text          not null references products (sku) on update cascade on delete cascade,
   live_price     numeric(10,2),
   status         text          not null check (status in ('synced', 'mismatch', 'failed')),
   last_synced_at timestamptz,
@@ -26,7 +27,7 @@ create table if not exists store_sync_status (
 -- idempotent. Attribution travels with the bytes because the licences that permit commercial use
 -- (`by`, `by-sa`) require it.
 create table if not exists product_images (
-  sku          text        primary key references products (sku) on delete cascade,
+  sku          text        primary key references products (sku) on update cascade on delete cascade,
   provider     text        not null,
   search_term  text        not null,
   source_url   text        not null,
@@ -43,3 +44,13 @@ create table if not exists product_images (
 -- Added after the first fetch: the provider's own title for the file it served, so a chosen image
 -- can be judged (and replaced) from the database alone rather than by repeating the search.
 alter table product_images add column if not exists source_title text;
+
+-- The same `on update cascade` for a database that was created before the dashboard could rename a
+-- SKU, since `create table if not exists` above leaves existing tables untouched. Dropping first is
+-- what keeps the pair re-runnable.
+alter table store_sync_status drop constraint if exists store_sync_status_sku_fkey;
+alter table store_sync_status add constraint store_sync_status_sku_fkey
+  foreign key (sku) references products (sku) on update cascade on delete cascade;
+alter table product_images drop constraint if exists product_images_sku_fkey;
+alter table product_images add constraint product_images_sku_fkey
+  foreign key (sku) references products (sku) on update cascade on delete cascade;

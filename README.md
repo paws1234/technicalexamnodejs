@@ -10,10 +10,11 @@ Task 3 — Centralized price sync. `plan.md` is the architecture, `task.md` the 
 |---|---|
 | `/` | the Next.js dashboard |
 | `/health`, `/prices`, `/prices/:sku` | the Express API |
+| `/products/:sku`, `/images/:sku` | the Express API (dashboard edits) |
 
 Both live in **one Vercel project**, declared as two **Services** in the root `vercel.json`
 (`frontend/` and `backend/` keep their own roots and their own installs). The top-level `rewrites`
-send the three API paths to the `backend` service and everything else to `frontend/`; a service
+send the API paths to the `backend` service and everything else to `frontend/`; a service
 receives the **original** request path, so `/prices` arrives at Express unchanged and the routes
 need no prefix. The frontend declares one **binding** to the backend —
 `{ "type": "service", "service": "backend", "format": "url", "env": "API_URL" }` — so Vercel
@@ -25,9 +26,9 @@ dashboard calls the API on its own origin.
 
 ```
 Shopify Store A ─┐                            ┌─ GET   /prices        catalogue + per-store state + has_mismatch
-                 ├── Express API (Vercel) ────┤
-Shopify Store B ─┘                            └─ PATCH /prices/:sku  central price, then both stores
-         ▲                  │
+                 ├── Express API (Vercel) ────┤  PATCH /prices/:sku  central price, then both stores
+Shopify Store B ─┘                            ├─ PATCH /products/:sku SKU + item name, then both stores
+         ▲                  │                 └─ PUT   /images/:sku   replace the image, then both stores
          │                  ▼
          │          Supabase Postgres ──────────── Next.js dashboard: the 10 SKUs, each store's last
          └──────── (source of truth) ◀────────────  known price/status, and a per-row price editor
@@ -39,6 +40,21 @@ its own `try`/`catch`, so one store failing is captured on its own `store_sync_s
 of failing the request — the response carries `{ sku, price, stores: [{ store, status, error }] }`
 and is a `502` only when *no* store took the price. The Admin API token is never stored: it is
 minted per store from one Dev Dashboard app's client id/secret and cached until it expires.
+
+The dashboard also edits the two text fields and the image, through the same per-store shape:
+
+| Route | What it does |
+|---|---|
+| `GET /images/:sku` | the stored bytes, with the row's hash as `ETag` (`304` on a matching `If-None-Match`) |
+| `PUT /images/:sku` | the file as the **raw request body**; magic-byte checked, stored, then each store's old media is deleted and the new file uploaded |
+| `PATCH /products/:sku` | renames the SKU and/or the item name, then moves each store's variant SKU and product title to match |
+
+A renamed SKU is a natural-key change, so both child tables (`store_sync_status`, `product_images`)
+carry `on update cascade` and follow the product in one statement. The image is replaced rather than
+added: the store's existing media is deleted first, so a product never holds two images. A name
+change does not rewrite the media `alt` already on a store — that text is set when the image is
+uploaded, and the image sync matches "the product's existing image" rather than the name, so a rename
+cannot cause a duplicate upload.
 
 ## Run it locally with Docker
 
@@ -165,8 +181,16 @@ node backend/scripts/sync-images.js --self-check  # offline: the search-term and
 ```
 
 It is re-runnable by design: an image is fetched once and afterwards read from `product_images`, and
-a store already carrying it (matched on the alt text, which is the product name) is left alone — so
-a second run is a verification pass, printing one line per store and SKU.
+a store already carrying an image is left alone — the check is "does this product have one", not
+"does it have one called what I expect", so **renaming a product does not trigger a re-upload** — and
+a second run is therefore a verification pass, printing one line per store and SKU.
+
+**The dashboard shows and replaces the image.** Each row renders its stored image first, before the
+SKU and the item name, served from `GET /images/:sku` and cache-busted with the row's hash so a
+replacement is visible without a hard refresh. `PUT /images/:sku` takes the file as the raw request
+body (identified by its magic bytes, not by the browser's `Content-Type`), stores it, and replaces
+the image on both stores — the old media is deleted first, so a product never ends up with two.
+A row with no stored image shows a dashed placeholder instead of a broken-image icon.
 
 **Choosing the image.** The search term is derived from the product name (the last two words, minus
 brand adjectives, numbers and trailing words like "Set"), because a name is a description rather
@@ -212,7 +236,12 @@ names are the standard libpq contract, so `psql`, `pg_dump` and node-postgres re
 ## Known simplifications
 
 - **`PATCH /prices/:sku` is unauthenticated.** The plan specifies no auth and adding one unasked was
-  out of scope, so the route is publicly writable once deployed. Flagged, not fixed.
+  out of scope, so the route is publicly writable once deployed. Flagged, not fixed. The same is
+  true of `PATCH /products/:sku` and `PUT /images/:sku`, which the dashboard feature added.
+- **A renamed product keeps the media `alt` it was uploaded with.** The stores' product *title* is
+  updated on a rename, but the alt text on the existing image is not re-written — that would mean
+  re-uploading the file or a `fileUpdate` per store. The image sync does not depend on the alt any
+  more, so the consequence is cosmetic (the store's alt can name the old title).
 - **Store state is written, never read live.** `GET /prices` compares the central price against the
   *last known* store price in `store_sync_status`, which is written by `PATCH` and by
   `node backend/scripts/refresh-status.js`. A price changed directly in a Shopify admin is therefore

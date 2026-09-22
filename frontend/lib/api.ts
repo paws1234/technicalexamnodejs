@@ -31,3 +31,33 @@ export async function updatePrice(sku: string, price: string) {
   });
   return response.json();
 }
+
+// A URL the *browser* follows — a server-rendered <img src> is opened by the browser, never by the
+// render that wrote it — so this base is the public one on both sides. `version` is the stored
+// hash: a replaced image is a different URL, which is what stops the old bytes being reused.
+export function imageUrl(sku: string, version: string) {
+  return `${PUBLIC_API_URL}/images/${encodeURIComponent(sku)}?v=${version}`;
+}
+
+// The dashboard's other two editable fields, in the same PATCH. Same return contract as
+// updatePrice: `error` for a rejected edit, `stores[]` for one the stores answered.
+export async function updateProduct(sku: string, changes: { sku: string; name: string }) {
+  const response = await fetch(`${API_URL}/products/${encodeURIComponent(sku)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes),
+  });
+  return response.json();
+}
+
+// The file is the whole body — the backend reads it with `express.raw`, so nothing has to build or
+// parse a multipart form. The declared type is a courtesy: the backend identifies the image from
+// its magic bytes, because a file name the browser does not recognise arrives with no type at all.
+export async function replaceImage(sku: string, file: File) {
+  const response = await fetch(`${API_URL}/images/${encodeURIComponent(sku)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  });
+  return response.json();
+}

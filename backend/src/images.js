@@ -28,6 +28,25 @@ const NOT_A_PHOTO = new Set([
   'vector', 'clipart', 'cartoon', 'logo', 'screenshot',
 ]);
 
+// What the bytes actually are, by magic number rather than by the Content-Type a caller claims:
+// the dashboard uploads a file straight from the browser, and Shopify rejects what it cannot decode.
+// The four formats the store accepts and the provider serves.
+export function sniffImageType(bytes) {
+  const hex = bytes.subarray(0, 12).toString('hex');
+  if (hex.startsWith('ffd8ff')) return 'image/jpeg';
+  if (hex.startsWith('89504e470d0a1a0a')) return 'image/png';
+  if (hex.startsWith('474946383761') || hex.startsWith('474946383961')) return 'image/gif';
+  if (hex.startsWith('52494646') && hex.slice(16, 24) === '57454250') return 'image/webp';
+  return null;
+}
+
+// The name the store's image URL is built from: the product name, with the extension taken from
+// the type actually served or sniffed (the provider does mix formats — SKU-006 is WebP).
+export function imageFilename(name, contentType) {
+  const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }[contentType] ?? 'jpg';
+  return `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}.${extension}`;
+}
+
 // "Aero Travel Mug" -> ["Travel Mug", "Mug"]: the leading brand adjective is what makes an image
 // search miss ("Aero" is a vacuum-insulated brand; photographs are titled with the noun phrase), so
 // the last two words are searched first and the last one alone is the fallback. Parentheticals,

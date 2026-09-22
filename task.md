@@ -34,8 +34,9 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | 3 — Deployment | 7 | 7 / 7 | complete |
 | 4 — End-to-end acceptance | 6 | 6 / 6 | complete |
 | 5 — Product images | 3 | 3 / 3 | complete |
+| 6 — Images & product details in the dashboard | 3 | 3 / 3 | complete |
 
-**Overall:** 57 / 57 done
+**Overall:** 60 / 60 done
 
 ## Environment variables
 
@@ -887,4 +888,61 @@ backend is unaffected and `backend/.env` gained nothing.
 - **Done when:** both stores report a `READY` image per SKU that matches the row it came from.
 - **Verify:** an independent read reports 20/20 `READY` with the uploaded size equal to the stored size and the dimensions decoding back to the stored image's dimensions.
 - **Evidence:** 2026-09-20 — **verified.** `10 Supabase images x 2 stores; 0 problems`, exit `0`, per pair: `READY 683x1024 uploaded=51935B (stored 51935B) … same-as-other-store`, with the store's filename (`aero-travel-mug.jpg`, `bamboo-desk-tray.webp`) matching the product name. Byte-identical comparison was tried first and **is not achievable**: Shopify re-encodes on ingest, so the bytes at the CDN URL differ from the uploaded file (51 kB/`76a8aae524` → 50 kB/`536d9847e2`, same 683x1024) and a hash check reported 20 false failures — the check was wrong, not the sync. Provenance is proved by two things Shopify itself reports: `MediaImage.originalSource.fileSize` equals the Supabase row's byte length **exactly** for all 20 pairs, and the store's `image.width/height` decode back to the same dimensions as the stored bytes (the driver reads JPEG/PNG/WebP headers to check this, which is how the WebP row was caught at all). Both stores serving the **same** re-encoded hash per SKU rules out one store receiving different bytes. Third path, independent of the app's credentials: the Shopify CLI's own store session reports `mediaCount { count }` = 1 for all ten Alpha products. End state: 10 `product_images` rows, 20/20 `READY`, `/prices` still flagged `0`.
+- **Blocks:** none
+
+---
+
+## Phase 6 — Images and product details in the dashboard (added 2026-09-22)
+
+Requested after the walkthrough: each product's image should appear in the dashboard next to its SKU
+and before the item name, and the SKU, the item name and the image should be editable from there and
+kept in step with both stores. Two new frontend components (`ProductImage`, `ProductEditor`) and two
+new routes (`GET`/`PUT /images/:sku`, `PATCH /products/:sku`); `GET /prices` now reports each row's
+image hash. No new environment variable: the upload is a raw request body, so no multipart parser
+and no storage bucket were introduced — the bytes go to the same `product_images` table Phase 5
+filled.
+
+### [x] T-6.1 — Serve the stored image and show it in the row
+
+- **Depends on:** `T-5.1`, `T-2.3`
+- **Size:** `S`
+- **Why:** the image already existed in Supabase but was only visible in the Shopify admin; the request puts it in the dashboard, before the item name.
+- **Do:**
+  1. `GET /images/:sku` returns the row's bytes with its content type, and the row's hash as the `ETag` so a replaced image is never served from a stale cache.
+  2. `GET /prices` reports `image: { sha256, bytes } | null` per row, so the table knows whether to render a thumbnail or a placeholder and can cache-bust with the hash.
+  3. `ProductImage` renders it, first in the product cell, and the row template gains the extra column.
+- **Files / artifacts:** `backend/src/app.js`, `backend/src/queries.js`, `frontend/components/ProductImage.tsx`, `frontend/app/page.tsx`
+- **Done when:** every row shows its stored image before the SKU and the item name, and a request for an image the database does not hold answers `404` rather than a broken image.
+- **Verify:** `GET /images/SKU-001` returns the stored bytes and an `ETag` equal to `product_images.sha256`; the same request with `If-None-Match` answers `304`; the dashboard's first cell child is the `<img>`, followed by the SKU and then the name; `GET /images/NOPE` → `404`.
+- **Evidence:** 2026-09-22 — **verified.** `GET /images/SKU-001` → `200`, `315677` bytes, `file` decodes it as an 816x1524 JPEG, `ETag: "95cc8965…ace6ed"` which is the row's `sha256`, and the `If-None-Match` replay → **`304`, 0 bytes**. `GET /images/NOPE` → `404 {"error":"no image for sku: NOPE"}`. `/prices` → `10` rows, `10` with `image`, row 1 `{"sha256":"95cc8965…","bytes":315677}`. In the browser (Playwright, after a reload — see the stale-render note in T-6.2): `10` `<img>` elements, the first cell's children read `[img, div(sku+name)]`, the thumbnail measures `40x40` with `naturalWidth/naturalHeight` `816x1524 complete=true`, and its `src` carries `?v=<sha>`. Layout was re-measured at 375 / 768 / 1280 / 1440: `scrollWidth ≤ viewport` and **0** elements extending past the viewport at every width. **One layout change was forced by the extra column:** the aligned-table breakpoint moved from `md` (768) to `lg` (1024) and the container from `max-w-4xl` to `max-w-5xl`, because at 768 the eight columns squeezed "Aero Travel Mug" onto three lines; at 1280 every item name now renders on one line in a 268px column.
+- **Blocks:** `T-6.2`, `T-6.3`
+
+### [x] T-6.2 — Edit the SKU and the item name, and push both to the stores
+
+- **Depends on:** `T-6.1`
+- **Size:** `M`
+- **Why:** a SKU is both the catalogue's primary key and the key every store lookup searches by, so a rename that stops at Supabase breaks the next price sync.
+- **Do:**
+  1. `PATCH /products/:sku` with a new `sku` and/or `name`: validate, update the catalogue row, then rename the variant's SKU and write the product title on both stores, reporting each store's result.
+  2. Let a rename follow into the child tables by giving both foreign keys `on update cascade` — in `seed/schema.sql` for a fresh database and as a re-runnable `alter table` for the existing one.
+  3. `ProductEditor` (a disclosure per row) for the two fields, and `productVariantsBulkUpdate`/`productUpdate` calls behind it.
+- **Files / artifacts:** `backend/src/app.js`, `backend/src/queries.js`, `backend/src/shopify.js`, `backend/seed/schema.sql`, `frontend/components/ProductEditor.tsx`, `frontend/lib/api.ts`
+- **Done when:** a rename moves the catalogue row, the sync log and the stored image together, both stores answer to the new SKU, and a price update still works afterwards.
+- **Verify:** rename a SKU and rename it back; after each step `products`, `store_sync_status` and `product_images` report the new SKU only, both stores resolve `sku:<new>` and no longer resolve the old one, and a `PATCH /prices/:sku` at the current price still reports both stores `synced`. Bad input: no field → `400`, empty name → `400`, malformed SKU → `400`, unknown SKU → `404`, a SKU in use → `409`.
+- **Evidence:** 2026-09-22 — **verified** on `SKU-010` (*Brass Desk Lamp*) renamed to `SKU-010T` and back. `PATCH /products/SKU-010 {"sku":"SKU-010T","name":"Brass Desk Lamp (rename test)"}` → `200` with both stores `synced`; the read-back showed `products` = `SKU-010T | Brass Desk Lamp (rename test) | 89.51`, **both** `store_sync_status` rows moved to `SKU-010T`, and `product_images` moved with the **same** `sha256`/`92090B` — the image was not re-uploaded. An independent Admin API read (its own token mint and query, not the app's) reported `alpha: matches=1 | sku=SKU-010T price=89.51 title="Brass Desk Lamp (rename test)"` and the same on `beta`, while `sku:SKU-010` returned `matches=0` on both. The rename back produced the identical picture, `/prices` showed `SKU-010` `alpha synced / beta synced`, and an idempotent `PATCH /prices/SKU-010` at its own `89.51` → `200` both `synced`, so a renamed SKU is still price-syncable. Refusals measured: `{}` → `400 "send a new name and/or sku"`, `{"name":""}` → `400`, `{"sku":"has space"}` → `400`, `PATCH /products/NOPE` → `404`, `{"sku":"SKU-002"}` from `SKU-001` → `409 "sku already in use: SKU-002"`. **Trap found and fixed on the way:** the first `{"sku":"x"}` attempt returned **`500`**, and the psql check said why — the live database still had the original `no action` foreign keys, so `create table if not exists` in `schema.sql` had never applied the new clause. Running `psql -f /seed/schema.sql` over the pooler (`ALTER TABLE` ×4) turned both constraints into `update=c delete=c` and the rename worked; the route now also logs 5xx (`GET/PATCH …: <error>`) because the handler's generic message had hidden a database error behind "Internal server error". The browser path was proved separately: a name edit submitted from the dashboard's editor (`requestSubmit`, sampled every 250ms) showed `Saving…` → the green `alpha synced · beta synced` after ~2.6s, and both stores then read `title="Field Notebook A5 (ui test)"`. **Rendering note:** the first Playwright read of the dashboard was a **stale render** from an earlier session (the price editor showed `22.00` while the table showed `300.00` and no thumbnail); the server-rendered HTML was correct all along, and re-navigating fixed it — same class of trap as the cached-env note in T-2.2.
+- **Blocks:** `T-6.3`
+
+### [x] T-6.3 — Replace the image from the dashboard
+
+- **Depends on:** `T-6.1`, `T-6.2`
+- **Size:** `M`
+- **Why:** the image was fetch-once, never replaceable; the request makes it a field the dashboard can change.
+- **Do:**
+  1. `PUT /images/:sku` with the file as the raw request body (`express.raw`, no multipart dependency): identify the type from the magic bytes, upsert the row with its new hash, then on each store delete the media the product already holds and upload the new bytes with the current name as the alt.
+  2. `deleteMediaFiles` (`fileDelete`, since `productDeleteMedia` is gone) and `sniffImageType`/`imageFilename` in the image module.
+  3. A file input in `ProductEditor` and `replaceImage` in `lib/api.ts`.
+- **Files / artifacts:** `backend/src/app.js`, `backend/src/shopify.js`, `backend/src/images.js`, `backend/src/queries.js`, `frontend/components/ProductEditor.tsx`, `frontend/lib/api.ts`
+- **Done when:** an uploaded file replaces the stored image and the store's image, leaving exactly one image per product per store.
+- **Verify:** upload a different image → the row's `sha256`/length become the uploaded file's, both stores report one `READY` image whose `originalSource.fileSize` equals the uploaded length, and the dashboard shows the new bytes after the refresh; a non-image body → `400`.
+- **Evidence:** 2026-09-22 — **verified**, both through the API and through the dashboard, on data that was restored afterwards. `PUT /images/SKU-001` with a different real photo (`63108B`, `500x500`) → `200` both stores `synced` with a CDN URL each; the row became `upload | uploaded | aero-travel-mug.jpg | ccd1e945… | 63108B`; `GET /images/SKU-001` served **exactly those bytes** with a matching `ETag`; and both stores reported `media=1 images=1 | READY 500x500 uploaded=63108B` — one image, the old file deleted, the uploaded byte count equal to the file's. The same PUT with the original bytes restored `SKU-001` to `openverse | by 3.0 | 95cc8965… | 315677B` and both stores to `READY 816x1524 uploaded=315677B`, with the provenance columns put back by the statement captured before the test (the bytes were identical, so the row stays honest) — `10 images`, `20` `synced` rows and `/prices` flagged `0` afterwards. The **browser** path was then run on `SKU-002` the same way: choose file → Save → `Saving…` for ~10.8s → green `image alpha synced · beta synced`, row `upload | field-notebook-a5-ui-test.jpg`, both stores `media=1 READY 768x1024 uploaded=60802B`, served bytes identical to the uploaded file. Refusals: a text body → `400 "send the image as the request body"`, an SVG → `400 "body is not a JPEG, PNG, WebP or GIF image"`. **Two bugs the browser run found, both fixed:** (1) the route first required an `image/*` Content-Type, and the browser reports `''` for a file it cannot type — so a perfectly good JPEG named `.bin` was refused, which is why the route now accepts any body and trusts the magic bytes; (2) the editor cleared its `file` state on both outcomes, leaving the native input still showing the chosen file, so a failure now keeps the file (one click to retry) and a success clears the input and the state together. `node backend/scripts/sync-images.js --self-check` additionally asserts the four sniffed formats and the filename, and a full re-run of the sync still reports `20/20 … already READY, 0 failed` — a renamed product's stale media `alt` can no longer cause a duplicate upload, because the "already there" check is now "the product has an image", not "the product has one called what I expect".
 - **Blocks:** none

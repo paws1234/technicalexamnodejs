@@ -14,6 +14,18 @@
     { "source": "/health", "destination": { "service": "backend" } },
     { "source": "/prices", "destination": { "service": "backend" } },
     { "source": "/prices/(.*)", "destination": { "service": "backend" } },
+    {
+      "source": "/products/(.*)",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/images/(.*)",
+      "destination": {
+        "service": "backend"
+      }
+    },
     { "source": "/(.*)", "destination": { "service": "frontend" } }
   ]
 }
