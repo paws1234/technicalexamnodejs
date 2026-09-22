@@ -6,7 +6,6 @@ const differs = (live, central) =>
   central === undefined ||
   Number(live) !== Number(central);
 
-// `live` is one Map-or-error per store: the recorded price is replaced by what was just read, so a stale `synced` cannot hide drift.
 export function mergeLivePrices(rows, live) {
   return rows.map((row) => ({
     ...row,
@@ -42,7 +41,6 @@ export function mergeLivePrices(rows, live) {
 export function flagMismatches(rows) {
   return rows.map((row) => ({
     ...row,
-    // A SKU no store has reported on is flagged too: silence is not agreement.
     has_mismatch:
       Object.values(row.stores).length === 0 ||
       Object.values(row.stores).some(

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Puts a product image on every SKU in both stores; re-runnable, so a second run is the verification pass.
 import assert from 'node:assert/strict';
 import { pool } from '../src/db.js';
 import { ensureImage, imageFilename, mentions, pickBest, searchTerms, sniffImageType } from '../src/images.js';
@@ -7,7 +6,6 @@ import { listPrices } from '../src/queries.js';
 import { addProductImage, findVariantBySku, productMedia, waitForMedia } from '../src/shopify.js';
 import { stores } from '../src/stores.js';
 
-// Phrases the derivation gets wrong, because the index holds no photo of the object under those words.
 const SEARCH_PHRASES = {
   'SKU-002': 'paper notebook', // "notebook" alone is a laptop
   'SKU-005': 'coffee dripper',
@@ -15,7 +13,6 @@ const SEARCH_PHRASES = {
   'SKU-010': 'reading lamp', // "desk lamp" returned a blurry 29KB shot
 };
 
-// The pure half of the pipeline, asserted against the seed catalogue and the two bad matches it produced.
 function selfCheck() {
   assert.deepEqual(searchTerms('Aero Travel Mug'), ['Travel Mug', 'Mug'], 'brand adjective dropped');
   assert.deepEqual(searchTerms('Insulated Bottle 750ml'), ['Insulated Bottle', 'Bottle'], 'digits dropped');
@@ -23,10 +20,8 @@ function selfCheck() {
   assert.deepEqual(searchTerms('Ceramic Pour-Over Set'), ['Ceramic Pour-Over', 'Pour-Over'], 'trailing "Set" dropped');
   assert.deepEqual(searchTerms('Apron'), ['Apron'], 'one word stays one term');
 
-  // The Alaska satellite photo a "Pour-Over Set" search returned: "set" must not match "Sunset".
   assert.equal(mentions({ title: 'Sunset over the Chukchi Sea', tags: [] }, 'pour-over set'), false);
   assert.equal(mentions({ title: 'Iced pour-over coffee', tags: [] }, 'pour-over'), true);
-  // The lens titled "… Travel Mug": the title passes, the photographer's tags are what reject it.
   const lens = { title: 'Canon Zoom Lens EF 70-200mm f/4 L USM Travel Mug', tags: [{ name: 'canon' }, { name: 'lens' }] };
   assert.equal(mentions(lens, 'travel mug'), true, 'the title does mention it');
   assert.equal(mentions(lens, 'travel mug', { tagsOnly: true }), false, 'the tags do not');
@@ -34,7 +29,6 @@ function selfCheck() {
   assert.equal(mentions({ title: '', tags: [{ name: 'pourover' }] }, 'pour-over'), true, 'a hyphenated term matches its squashed tag');
   assert.equal(mentions({ title: '', tags: [{ name: 'sock' }] }, 'socks'), true, 'a plural term matches its singular tag');
 
-  // The shortest title that names the object wins, and a title match beats a tags-only one.
   const mug = { title: 'Travel mug', tags: [] };
   assert.equal(pickBest([lens, mug], 'travel mug'), mug, 'the photo titled "Travel mug" wins');
   const insulator = { title: 'old electric line insulators, bottle tree ranch', tags: [{ name: 'insulated' }, { name: 'bottle' }] };
@@ -42,7 +36,6 @@ function selfCheck() {
   assert.equal(pickBest([insulator, flask], 'insulated bottle'), flask, 'a title match beats a tag-only one');
   assert.equal(pickBest([lens], 'insulated bottle'), null, 'no match is null, not a wrong photo');
 
-  // The upload route sniffs magic bytes, so the formats it accepts are asserted rather than trusted.
   assert.equal(sniffImageType(Buffer.from('ffd8ffdb', 'hex')), 'image/jpeg');
   assert.equal(sniffImageType(Buffer.from('89504e470d0a1a0a0000000d', 'hex')), 'image/png');
   assert.equal(sniffImageType(Buffer.from('474946383961', 'hex')), 'image/gif');
@@ -73,7 +66,6 @@ for (const { sku, name } of rows) {
 
     for (const store of stores) {
       const { productId } = await findVariantBySku(sku, store);
-      // "Is there an image" rather than "is there one named what I expect": the alt is the product name.
       const held = (await productMedia(store, productId)).find((node) => node.mediaContentType === 'IMAGE');
       if (held?.status === 'READY') {
         outcomes.push(`${sku} ${store.key}: already READY`);

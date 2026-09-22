@@ -7,14 +7,11 @@ import { updatePrice } from '@/lib/api';
 type Store = { status: string; live_price?: string | null; error?: string | null };
 type StoreResult = { store: string; status: string; error?: string | null };
 
-// The names the table's own headers use, so a button names the store the operator is looking at.
 const LABEL: Record<string, string> = { alpha: 'Store A', beta: 'Store B' };
 const name = (key: string) => LABEL[key] ?? key;
-// "22.0" and "22.00" are one price — the same rule the flags use — so no button is offered for a store already in step.
 const same = (a: string, b: string) => Number(a) === Number(b);
 const BUTTON = 'rounded px-2 py-1 text-xs font-medium disabled:opacity-50';
 
-// A drifted row is a decision: push central out again, or adopt a store's value. Both are one PATCH, so both stores end level.
 export default function DriftResolver({
   sku,
   central,
@@ -23,8 +20,7 @@ export default function DriftResolver({
   sku: string;
   central: string;
   stores: Record<string, Store | undefined>;
-}) {
-  // Which button is in flight, so one click cannot be sent twice and only that button says so.
+    }) {
   const [pending, setPending] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const router = useRouter();
@@ -33,7 +29,6 @@ export default function DriftResolver({
   const drifted = entries.filter(
     ([, store]) => store.status !== 'synced' || (store.live_price != null && !same(store.live_price, central)),
   );
-  // Only a value we actually read can be adopted; a store whose read failed has nothing to offer.
   const adoptable = entries.filter(([, store]) => store.live_price != null && !same(store.live_price, central));
 
   async function resolve(action: string, value: string) {
@@ -46,9 +41,8 @@ export default function DriftResolver({
         return;
       }
       const results: StoreResult[] = result.stores ?? [];
-      const failed = results.filter((store) => store.status !== 'synced');
-        // Only a failure is reported: a clean resolution removes this box with the refreshed row.
-      if (failed.length > 0) {
+        const failed = results.filter((store) => store.status !== 'synced');
+        if (failed.length > 0) {
         setNote(failed.map((store) => `${name(store.store)}: ${store.error ?? store.status}`).join(' · '));
       }
       router.refresh();

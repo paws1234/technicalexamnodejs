@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Mints a token for one store via the client credentials grant: node backend/scripts/shopify-token.mjs <alpha|beta> [--print].
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +25,6 @@ const store = STORES[storeName];
 const clientId = process.env.SHOPIFY_CLIENT_ID;
 const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
 
-// Every missing name at once, so one run fixes the whole .env. Names only — never values.
 const missing = [
   !store && `SHOPIFY_${storeName.toUpperCase()}_STORE`,
   !clientId && 'SHOPIFY_CLIENT_ID',
@@ -55,7 +53,6 @@ let parsed = null;
 try {
   parsed = JSON.parse(body);
 } catch {
-  // Non-JSON body: the status and the first bytes below are the whole diagnosis.
 }
 
 if (!response.ok || !parsed?.access_token) {
@@ -78,7 +75,6 @@ if (!response.ok || !parsed?.access_token) {
 }
 
 if (printOnly) {
-  // Bare token only, so `TOKEN=$(...)` is safe.
   console.log(parsed.access_token);
 } else {
   console.log(
@@ -87,7 +83,6 @@ if (printOnly) {
   );
 }
 
-// An empty `scope` means the token can do nothing (measured 2026-09-20), so exit 3 keeps "exit 0" meaningful.
 if (!parsed.scope) {
     console.error(
         [

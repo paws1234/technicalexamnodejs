@@ -1,7 +1,5 @@
-// The Admin API calls the sync makes; the token is minted here rather than read from .env, because admin-created custom apps no longer exist.
 import { config } from './config.js';
 
-// store.key -> { token, expiresAt }; the 5-minute margin stops a token expiring between mint and use.
 const tokenCache = new Map();
 
 async function mintToken(store) {
@@ -23,7 +21,6 @@ async function mintToken(store) {
   try {
     parsed = JSON.parse(body);
   } catch {
-    // Non-JSON body: the status and the first bytes below are the whole diagnosis.
   }
 
   if (!response.ok || !parsed?.access_token) {
@@ -42,7 +39,6 @@ export async function getAccessToken(store) {
   return token;
 }
 
-// GraphQL answers 200 even when it refuses a field, so the errors array is checked as well as the status.
 async function adminGraphql(store, query, variables) {
   const response = await fetch(
     `https://${store.domain}/admin/api/${config.shopifyApiVersion}/graphql.json`,
@@ -86,7 +82,6 @@ export async function readStorePrices(store) {
   return new Map((data?.productVariants?.nodes ?? []).map(({ sku, price }) => [sku, price]));
 }
 
-// Takes what findVariantBySku returned, so the caller need not know the product id addresses the variant.
 export async function updateVariantPrice(store, { variantId, productId }, price) {
   const data = await adminGraphql(
     store,
@@ -113,7 +108,6 @@ export async function updateVariantPrice(store, { variantId, productId }, price)
   return variant.price;
 }
 
-// A title edit has to reach the store, or the two disagree about what the product is called.
 export async function updateProductTitle(store, productId, title) {
   const result = (
     await adminGraphql(
@@ -136,7 +130,6 @@ export async function updateProductTitle(store, productId, title) {
   return result.product?.title;
 }
 
-// The SKU lives on the variant's inventory item, which is why it is nested in the bulk-mutation input.
 export async function updateVariantSku(store, { variantId, productId }, sku) {
   const data = await adminGraphql(
     store,
@@ -161,7 +154,6 @@ export async function updateVariantSku(store, { variantId, productId }, sku) {
   return variant.sku;
 }
 
-// The inline fragment is what reaches `image`: `media` returns the `Media` interface, which has none.
 export async function productMedia(store, productId) {
     const data = await adminGraphql(
         store,
@@ -177,11 +169,9 @@ export async function productMedia(store, productId) {
     return data?.product?.media?.nodes ?? [];
 }
 
-// How long to wait for Shopify to finish processing an image before calling it a failure.
 const MEDIA_POLL_MS = 1000;
 const MEDIA_ATTEMPTS = 20;
 
-// Media processing is asynchronous (UPLOADED -> READY), so success is reported only after the poll.
 export async function waitForMedia(store, productId, mediaId) {
     for (let attempt = 0; attempt < MEDIA_ATTEMPTS; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, MEDIA_POLL_MS));
@@ -194,7 +184,7 @@ export async function waitForMedia(store, productId, mediaId) {
     throw new Error(`${store.key}: media ${mediaId} was still not READY after ${MEDIA_ATTEMPTS}s`);
 }
 
-// Three calls: stagedUploadsCreate, POST the file, then `productUpdate` (its `media` arg replaced `productCreateMedia`).
+// Three calls: stagedUploadsCreate, POST the file, then `productUpdate` (its `media` arg replaced `productCreateMedia`); media becomes READY asynchronously.
 export async function addProductImage(store, productId, { filename, bytes, contentType, alt }) {
     const staged = (
         await adminGraphql(
@@ -219,7 +209,6 @@ export async function addProductImage(store, productId, { filename, bytes, conte
     const target = staged.stagedTargets?.[0];
     if (!target) throw new Error(`${store.key}: staged upload returned no target`);
 
-  // The signed bucket fields go exactly as given, then the file; FormData sets its own boundary.
     const form = new FormData();
     for (const { name, value } of target.parameters) form.append(name, value);
     form.append('file', new Blob([bytes], { type: contentType }), filename);
@@ -253,7 +242,6 @@ export async function addProductImage(store, productId, { filename, bytes, conte
     return waitForMedia(store, productId, created.id);
 }
 
-// `productDeleteMedia` is gone too: `fileDelete` removes the media, leaving the product ready for a new one.
 export async function deleteMediaFiles(store, fileIds) {
   const result = (
     await adminGraphql(

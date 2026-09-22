@@ -1,4 +1,3 @@
-// pg reads the libpq names itself, so this module carries no connection settings; config.js loads .env.
 import './config.js';
 import { Pool } from 'pg';
 

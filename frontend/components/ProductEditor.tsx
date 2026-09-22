@@ -7,7 +7,6 @@ import { replaceImage, updateProduct } from '@/lib/api';
 type StoreResult = { store: string; status: string; error?: string | null };
 type Note = { tone: 'ok' | 'bad'; text: string };
 
-// One line: the failed stores with their reasons, or the stores that took the change.
 function describe(result: { error?: string; stores?: StoreResult[] }): Note {
   if (result.error) return { tone: 'bad', text: result.error };
   const stores = result.stores ?? [];
@@ -21,7 +20,6 @@ function describe(result: { error?: string; stores?: StoreResult[] }): Note {
 const kB = (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} kB`;
 const FIELD = 'grid gap-1 text-xs font-medium text-gray-500';
 
-// The row's editors behind a disclosure, so ten rows of controls do not bury the table; `router.refresh()` re-reads the row.
 export default function ProductEditor({
   sku,
   name,
@@ -36,7 +34,6 @@ export default function ProductEditor({
   const [file, setFile] = useState<File | null>(null);
   const [pending, setPending] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
-  // A file input owns its own value, so the DOM value is cleared too, and only once the upload lands.
   const fileInput = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
@@ -55,18 +52,14 @@ export default function ProductEditor({
       if (edited) {
         const result = await updateProduct(sku, { sku: nextSku, name: nextName });
         setNote(describe(result));
-        // A rejected edit leaves the catalogue untouched, so the image must not attach under a SKU nobody renamed.
         if (result.error) return;
       }
 
       if (file) {
-        // Under the *new* SKU when the rename went through: that is what both stores now hold.
         const image = describe(await replaceImage(nextSku, file));
-        // A rejection keeps the chosen file, so fixing the reason and submitting again is one click.
         if (image.tone === 'bad') {
           setNote(image);
         } else {
-          // Appended, so a submit that did both reports both instead of the second hiding the first.
           setNote((current) => ({ tone: 'ok', text: current ? `${current.text} · image ${image.text}` : `image ${image.text}` }));
           setFile(null);
           if (fileInput.current) fileInput.current.value = '';
@@ -80,7 +73,6 @@ export default function ProductEditor({
   }
 
   return (
-    // A grid child of the row, so `lg:col-span-full` puts the editor under it rather than in the action column.
     <details className="border-t border-dashed border-gray-200 pt-1 lg:col-span-full">
       <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-900">
         Edit SKU, item name or image

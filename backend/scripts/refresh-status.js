@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Fills store_sync_status from what the stores hold (the recorded log, not what /prices compares); run: node backend/scripts/refresh-status.js
 import { pool } from '../src/db.js';
 import { listPrices, recordSyncResult } from '../src/queries.js';
 import { findVariantBySku } from '../src/shopify.js';
@@ -12,7 +11,6 @@ for (const { sku, central_price: central } of rows) {
   for (const store of stores) {
     try {
       const { price } = await findVariantBySku(sku, store);
-      // Compare as numbers: pg and Shopify both send strings, so "22.0" and "22.00" are one price.
       const status = Number(price) === Number(central) ? 'synced' : 'mismatch';
       await recordSyncResult({ store: store.key, sku, status, livePrice: price });
     } catch (error) {

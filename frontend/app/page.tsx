@@ -5,14 +5,12 @@ import ProductEditor from '@/components/ProductEditor';
 import ProductImage from '@/components/ProductImage';
 import DriftResolver from '@/components/DriftResolver';
 
-// One grid for both widths: `lg:contents` dissolves each label/value wrapper, so a phone sees labelled lines and a desktop sees columns.
 const COLS =
   'lg:grid-cols-[2.75rem_4.5rem_minmax(0,1fr)_5rem_7rem_7rem_11rem] lg:items-center lg:gap-4';
 const ROW = `grid gap-1.5 py-3 lg:py-2 ${COLS}`;
 const CELL = 'grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2 lg:contents';
 const LABEL = 'text-xs uppercase tracking-wide text-gray-500 lg:hidden';
 
-// A store entry can be absent and `image` null, so both are read optionally; `has_mismatch` is the backend's verdict.
 type PriceRow = {
   sku: string;
   name: string;
