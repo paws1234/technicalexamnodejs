@@ -7,6 +7,10 @@ import { imageUrl } from '@/lib/api';
 // replaced. An empty alt is deliberate — the item name is the text right next to it, and the
 // thumbnail is there to be recognised, not read out twice.
 //
+// `loading="lazy"` spreads the ten requests out instead of firing them all at once: the rows below
+// the fold are only fetched as they are scrolled to, which is what keeps a page view from opening a
+// database connection per thumbnail in one burst.
+//
 // A SKU with no stored image keeps the column's width with a dashed placeholder, which says "none
 // yet" where a broken-image icon would look like a fault.
 export default function ProductImage({ sku, sha }: { sku: string; sha?: string | null }) {
@@ -21,6 +25,8 @@ export default function ProductImage({ sku, sha }: { sku: string; sha?: string |
       alt=""
       width={40}
       height={40}
+      loading="lazy"
+      decoding="async"
       className="h-10 w-10 rounded border border-gray-200 object-cover"
     />
   );

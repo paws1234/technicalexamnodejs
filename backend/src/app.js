@@ -101,16 +101,20 @@ app.patch('/prices/:sku', async (req, res) => {
   return res.status(noStoreSynced ? 502 : 200).json({ sku, price: applied, stores: results });
 });
 
-// The stored image bytes, which is what the dashboard's <img> fetches. The row's hash is the ETag,
-// so a replaced image (different bytes, different hash) is never served out of a stale cache:
-// `no-cache` asks the browser to revalidate every time, and Express answers a matching
-// `If-None-Match` with 304 instead of the bytes.
+// The stored image bytes, which is what the dashboard's <img> fetches.
+//
+// The URL is content-addressed (`?v=<sha256>`), so the bytes behind a given URL can never change:
+// the cache is told it may keep them for a year and never revalidate. That is what stops ten
+// thumbnails per page view — eleven connections with the page's own query — from being eleven
+// database connections every time, because the edge answers a cached image without invoking this
+// function at all. A replaced image is uploaded under a *new* hash and therefore a new URL, so
+// nothing here can go stale. The ETag is kept for a client that revalidates anyway.
 app.get('/images/:sku', async (req, res) => {
   const image = await getImage(req.params.sku);
   if (!image) {
     return res.status(404).json({ error: `no image for sku: ${req.params.sku}` });
   }
-  res.set('Cache-Control', 'no-cache');
+  res.set('Cache-Control', 'public, max-age=31536000, immutable');
   res.set('ETag', `"${image.sha256}"`);
   res.type(image.content_type).send(image.bytes);
 });

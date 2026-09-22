@@ -192,6 +192,17 @@ body (identified by its magic bytes, not by the browser's `Content-Type`), store
 the image on both stores — the old media is deleted first, so a product never ends up with two.
 A row with no stored image shows a dashed placeholder instead of a broken-image icon.
 
+**Eleven connections per page view, and why that is not eleven any more.** The page's own query plus
+ten thumbnails used to be eleven database connections on every load, against a Supabase pooler that
+allows fifteen clients in session mode — so a burst of thumbnails could take the last slot and the
+rest answered `500` (`EMAXCONNSESSION`), which is why some images were missing on the deployed
+dashboard. Three things fix it: the image URL carries the row's `sha256`, so it is served
+`immutable` and an already-seen image is answered by the edge **without invoking the function at
+all** (a replaced image is a new URL, so nothing goes stale); the thumbnails are `loading="lazy"`;
+and the deployment connects on the pooler's **transaction** port (`PGPORT=6543`), where a connection
+is held for one query rather than for the life of a serverless instance. Locally `PGPORT` stays
+`5432`, because the `psql` recipes need a real session (`begin; … rollback;`).
+
 **Choosing the image.** The search term is derived from the product name (the last two words, minus
 brand adjectives, numbers and trailing words like "Set"), because a name is a description rather
 than a query. A few names have no photograph of the object under any derived term — "Coasters" finds
