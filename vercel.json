@@ -15,6 +15,12 @@
     { "source": "/prices", "destination": { "service": "backend" } },
     { "source": "/prices/(.*)", "destination": { "service": "backend" } },
     {
+      "source": "/changes",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
       "source": "/products/(.*)",
       "destination": {
         "service": "backend"
