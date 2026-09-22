@@ -1,9 +1,10 @@
-import { getPrices } from '@/lib/api';
+import { getChanges, getPrices } from '@/lib/api';
 import StatusBadge from '@/components/StatusBadge';
 import PriceEditor from '@/components/PriceEditor';
 import ProductEditor from '@/components/ProductEditor';
 import ProductImage from '@/components/ProductImage';
 import DriftResolver from '@/components/DriftResolver';
+import ChangeLog, { type ChangeEntry } from '@/components/ChangeLog';
 
 const COLS =
   'lg:grid-cols-[2.75rem_4.5rem_minmax(0,1fr)_5rem_7rem_7rem_11rem] lg:items-center lg:gap-4';
@@ -27,7 +28,7 @@ type PriceRow = {
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  const prices: PriceRow[] = await getPrices();
+  const [prices, changes]: [PriceRow[], ChangeEntry[]] = await Promise.all([getPrices(), getChanges()]);
 
   return (
     <main className="mx-auto max-w-5xl p-4 lg:p-8">
@@ -81,6 +82,8 @@ export default async function Home() {
           </li>
         ))}
       </ul>
+
+      <ChangeLog changes={changes} />
     </main>
   );
 }

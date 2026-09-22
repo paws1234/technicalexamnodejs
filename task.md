@@ -36,8 +36,9 @@ header `Status:` moves `not started` → `in progress` → `complete`.
 | 5 — Product images | 3 | 3 / 3 | complete |
 | 6 — Images & product details in the dashboard | 4 | 4 / 4 | complete |
 | 7 — Drift resolution in the dashboard | 1 | 1 / 1 | complete |
+| 8 — Change log | 2 | 2 / 2 | complete |
 
-**Overall:** 62 / 62 done
+**Overall:** 64 / 64 done
 
 ## Environment variables
 
@@ -983,4 +984,38 @@ filled.
 - **Done when:** a drifted row offers both resolutions, and either one leaves both stores holding the chosen price.
 - **Verify:** with a store edited directly in a Shopify admin, the dashboard shows the resolver on that row only; `Use <store>` sets the central price to the store's value and syncs both stores; `Keep central` writes the central price back to the drifted store; `/prices` flags `0` afterwards.
 - **Evidence:** 2026-09-22 — **verified**, both resolutions, against live stores. **No backend change was needed:** adopting a store's price is the same `PATCH /prices/:sku` with that value, so a resolution travels the path a manual edit already takes (central first, then both stores) — and both stores end level whichever button is pressed. `DriftResolver.tsx` is a client component rendered only on a `has_mismatch` row (that flag is the backend's own verdict, so the rule lives in one place), and it offers no "use" button for a store whose price could not be read. **Adopt, on the drift already present** (`SKU-010`, Alpha `99.51` against central `89.51`): the row rendered `Out of step: Store A holds 99.51 — central is 89.51. Which price should both stores follow?` with `Keep central (89.51)` and `Use Store A (99.51)`; clicking `Use Store A` → `PATCH` → `/prices` `flagged 0` and `SKU-010 central 99.51 | A synced 99.51 | B synced 99.51`, i.e. accepting one store's price reached the other store as well. **Keep central:** a fresh drift was made with a direct store-side write (`beta SKU-007` `14.00 → 20.00` through `updateVariantPrice`, outside the central route — which is what a manual admin edit looks like to this system); the row showed `Store B holds 20.00 — central is 14.00`, and clicking `Keep central (14.00)` → `flagged 0`, `SKU-007 central 14.00 | A synced 14.00 | B synced 14.00`, so no price moved and the check is repeatable. **Unreadable store:** with `SHOPIFY_BETA_STORE` pointed at a non-existent host locally the box reads `Store B could not be read (token request for beta failed: HTTP 404 …)` and offers **only** `Keep central` — there is no live value to adopt — while the red `failed` badge stays. All three states were looked at in a browser (row-scoped screenshots), and the resolver appeared on the flagged row only: one box across ten rows in the normal case. `tsc --noEmit` clean; `next build` green with `/` still `ƒ (Dynamic)`. **Data left as found:** the adopt test was reverted (`SKU-010` back to `89.51` centrally and on both stores) and the Beta drift was resolved back to `14.00`, so the run ends `/prices` `flagged 0` with every row `synced`.
+- **Blocks:** none
+
+---
+
+## Phase 8 — Change log (added 2026-09-22, after Phase 7)
+
+### [x] T-8.1 — Record every write, per target, in an append-only log
+
+- **Depends on:** `T-1.13`, `T-1.14`, `T-6.3`
+- **Size:** `M`
+- **Why:** every response already carries each store's outcome and `store_sync_status` holds the latest state per store, but nothing answers "what changed, when, and what did each store do about it" — and a failed store's attempt is overwritten by the next successful sync, so the failure leaves no trace.
+- **Do:**
+  1. Add `change_log` to `backend/seed/schema.sql`: append-only, one row per target, the rows of one operation sharing a `change_id`, with `old_value`/`new_value`, `status` and `error`.
+  2. Make every write path log it: `updateCentralPrice`, `updateProductDetails` and `replaceProductImage` write the row **and** its `central` log entry in one statement (the pooler runs in transaction mode, so a session cannot span statements); `syncStore`, `syncImage` and `syncDetails` append a row per store once the store has answered.
+  3. Give `findVariantBySku` the store's current `sku` and `title`, so a rename records what the store held rather than what was asked for.
+- **Files / artifacts:** `backend/seed/schema.sql`, `backend/src/queries.js`, `backend/src/app.js`, `backend/src/shopify.js`
+- **Done when:** one PATCH leaves three rows sharing one `change_id`, and a store that refuses is recorded as `failed` with its own error.
+- **Verify:** `node backend/scripts/changes.js --limit 3` after a PATCH → three rows, one `change_id`, `central applied` and `alpha`/`beta` `synced`; with one store broken, that store's row is `failed` with the store's message while the other two still record their outcome.
+- **Evidence:** 2026-09-22 — **verified**, all three write paths and the failure path. Schema applied to the live database over the pooler (`psql -f seed/schema.sql` → `CREATE TABLE` plus three `CREATE INDEX`). **Price:** `PATCH /prices/SKU-003 {"price":"26.50"}` → `rows 3 | distinct change_id 1`, `central price 26.50 -> 26.50 applied`, `alpha`/`beta` `synced`. **Rename:** `PATCH /products/SKU-007 {"name":"… renamed"}` logged three rows on that field only (central `applied`, both stores `synced`, each carrying the store's previous title) and the revert logged three more; `SKU-007` then held six entries across the three targets and both stores' titles read back as the original. **Image:** `PUT /images/SKU-010` with the row's own bytes → `central image <sha256> -> <sha256> applied` plus a `synced` row per store holding the old and new `MediaImage` gid; the provenance row was restored afterwards (`provider openverse`, `license by 2.0`, `fetched_at` unchanged). **Failure:** with `SHOPIFY_BETA_STORE` pointed at a non-existent host the PATCH answered `200` with `beta failed`, and the log held `beta SKU-003 price null -> 26.50 failed token request for beta failed: HTTP 404` beside `central applied` and `alpha synced`; after restoring, the retry logged a second operation (`beta … synced`), so the failure is kept **and** the recovery is visible. One Postgres trap was found by running it rather than reading it: inside the `union all` that logs a rename's two fields, Postgres inferred the `change_id` parameter as `text` and refused the insert (`column "change_id" is of type uuid but expression is of type text`) — fixed with an explicit `$4::uuid`, applied to all three statements.
+- **Blocks:** `T-8.2`
+
+### [x] T-8.2 — Read the log: API, CLI and dashboard
+
+- **Depends on:** `T-8.1`, `T-2.3`
+- **Size:** `M`
+- **Why:** a log nobody can read is not a feature, and the three surfaces answer different questions: the CLI in a terminal, the endpoint for anything programmatic, the panel for "what just happened" while looking at the table.
+- **Do:**
+  1. `GET /changes?limit=&sku=` in `backend/src/app.js`, newest first, validating both parameters.
+  2. `backend/scripts/changes.js`, printing the entries grouped by operation.
+  3. `frontend/components/ChangeLog.tsx` under the table, grouped by `change_id`, one line per target.
+- **Files / artifacts:** `backend/src/app.js`, `backend/scripts/changes.js`, `frontend/components/ChangeLog.tsx`, `frontend/lib/api.ts`, `frontend/app/page.tsx`
+- **Done when:** the same rows are readable from all three surfaces.
+- **Verify:** `curl -s localhost:3000/changes?limit=3` → the three rows of the last operation; `node backend/scripts/changes.js --limit 3` prints them grouped under one heading; the dashboard shows a *Change log* panel naming Central/Store A/Store B.
+- **Evidence:** 2026-09-22 — **verified**. Endpoint: `200` for `?sku=SKU-003&limit=2`, and `400` for `limit=0`, `limit=201`, `limit=abc` and a bad `sku` (`sku must be 1-64 characters…`), so a malformed query cannot answer as "no changes". CLI: `node backend/scripts/changes.js --limit 9` printed three operations of three rows each — `central/alpha/beta`, old → new, status, and the failure message — ending `9 of 12 entries`, exit 0. Dashboard: the server-rendered panel read `Change log — 12 most recent entries, 4 operations` and, expanded in the browser, showed each operation as a block (timestamp, `change_id` prefix, row count) with one line per target; `applied` was added to `StatusBadge`'s palette so the central row is not grey. `tsc --noEmit` clean, `next build` green with `/` still `ƒ (Dynamic)`.
 - **Blocks:** none

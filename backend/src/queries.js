@@ -10,10 +10,24 @@ export async function getProduct(sku) {
   return rows[0] ?? null;
 }
 
-export async function updateProductDetails(sku, { sku: nextSku, name }) {
+// The update and its log rows are one statement, so the log cannot drift from the change (the pooler runs in transaction mode, so a session cannot span statements).
+export async function updateProductDetails(sku, { sku: nextSku, name }, changeId) {
   const { rows } = await pool.query(
-    'update products set sku = $1, name = $2, updated_at = now() where sku = $3 returning sku, name, price',
-    [nextSku, name, sku],
+    `with before as (
+       select sku as old_sku, name as old_name from products where sku = $3
+     ), updated as (
+       update products set sku = $1, name = $2, updated_at = now() where sku = $3
+       returning sku, name, price
+     ), logged as (
+       insert into change_log (change_id, target, sku, field, old_value, new_value, status)
+       select $4::uuid, 'central', before.old_sku, 'sku', before.old_sku, updated.sku, 'applied'
+       from before, updated where before.old_sku is distinct from updated.sku
+       union all
+       select $4::uuid, 'central', before.old_sku, 'name', before.old_name, updated.name, 'applied'
+       from before, updated where before.old_name is distinct from updated.name
+     )
+     select sku, name, price from updated`,
+    [nextSku, name, sku, changeId],
   );
   return rows[0];
 }
@@ -26,29 +40,73 @@ export async function getImage(sku) {
   return rows[0] ?? null;
 }
 
-export async function replaceProductImage({ sku, bytes, contentType, sha256, filename }) {
+export async function replaceProductImage({ sku, bytes, contentType, sha256, filename }, changeId) {
   const { rows } = await pool.query(
-    `insert into product_images
-       (sku, provider, search_term, source_url, landing_url, source_title, license, creator,
-        content_type, bytes, sha256, fetched_at)
-     values ($1, 'upload', 'dashboard upload', $2, $2, $3, 'uploaded', null, $4, $5, $6, now())
-     on conflict (sku) do update set
-       provider = excluded.provider, search_term = excluded.search_term, source_url = excluded.source_url,
-       landing_url = excluded.landing_url, source_title = excluded.source_title, license = excluded.license,
-       creator = excluded.creator, content_type = excluded.content_type, bytes = excluded.bytes,
-       sha256 = excluded.sha256, fetched_at = excluded.fetched_at
-     returning sha256, length(bytes)::int as size`,
-    [sku, `upload://${filename}`, filename, contentType, bytes, sha256],
+    `with before as (select sha256 as old_sha from product_images where sku = $1),
+     saved as (
+       insert into product_images
+         (sku, provider, search_term, source_url, landing_url, source_title, license, creator,
+          content_type, bytes, sha256, fetched_at)
+       values ($1, 'upload', 'dashboard upload', $2, $2, $3, 'uploaded', null, $4, $5, $6, now())
+       on conflict (sku) do update set
+         provider = excluded.provider, search_term = excluded.search_term, source_url = excluded.source_url,
+         landing_url = excluded.landing_url, source_title = excluded.source_title, license = excluded.license,
+         creator = excluded.creator, content_type = excluded.content_type, bytes = excluded.bytes,
+         sha256 = excluded.sha256, fetched_at = excluded.fetched_at
+       returning sha256, length(bytes)::int as size
+     ), logged as (
+       insert into change_log (change_id, target, sku, field, old_value, new_value, status)
+       select $7::uuid, 'central', $1, 'image', coalesce(before.old_sha, 'none'), saved.sha256, 'applied'
+       from saved left join before on true
+     )
+     select sha256, size from saved`,
+    [sku, `upload://${filename}`, filename, contentType, bytes, sha256, changeId],
   );
   return rows[0];
 }
 
-export async function updateCentralPrice(sku, price) {
+export async function updateCentralPrice(sku, price, changeId) {
   const { rows } = await pool.query(
-    'update products set price = $1, updated_at = now() where sku = $2 returning price',
-    [price, sku],
+    `with before as (select price as old_price from products where sku = $2),
+     updated as (update products set price = $1, updated_at = now() where sku = $2 returning price),
+     logged as (
+       insert into change_log (change_id, target, sku, field, old_value, new_value, status)
+       select $3::uuid, 'central', $2, 'price', before.old_price, updated.price, 'applied'
+       from before, updated
+     )
+     select price from updated`,
+    [price, sku, changeId],
   );
   return rows[0].price;
+}
+
+export async function recordChange({
+  changeId,
+  target,
+  sku,
+  field,
+  oldValue = null,
+  newValue = null,
+  status,
+  error = null,
+}) {
+  await pool.query(
+    `insert into change_log (change_id, target, sku, field, old_value, new_value, status, error)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [changeId, target, sku, field, oldValue, newValue, status, error],
+  );
+}
+
+export async function listChanges({ limit = 50, sku = null } = {}) {
+  const { rows } = await pool.query(
+    `select id, change_id, at, target, sku, field, old_value, new_value, status, error
+     from change_log
+     where $1::text is null or sku = $1
+     order by id desc
+     limit $2`,
+    [sku, limit],
+  );
+  return rows;
 }
 
 export async function recordSyncResult({ store, sku, status, livePrice = null, error = null }) {

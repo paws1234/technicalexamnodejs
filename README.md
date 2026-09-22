@@ -45,6 +45,7 @@ The dashboard also edits the two text fields and the image, through the same per
 
 | Route | What it does |
 |---|---|
+| `GET /changes` | the change log, newest first, one row per target (`limit`, `sku`) |
 | `GET /images/:sku` | the stored bytes, with the row's hash as `ETag` (`304` on a matching `If-None-Match`) |
 | `PUT /images/:sku` | the file as the **raw request body**; magic-byte checked, stored, then each store's old media is deleted and the new file uploaded |
 | `PATCH /products/:sku` | renames the SKU and/or the item name, then moves each store's variant SKU and product title to match |
@@ -62,6 +63,21 @@ dashboard renders a **drift resolver** on that row — *Store A holds 99.51, cen
 different value, so whichever is chosen the two stores end up holding it: the central price moves
 only when the operator chooses to adopt a store's value. A store that could not be read offers no
 "use" button, because there is nothing to adopt.
+
+## Change log
+
+Every write also appends to an append-only `change_log` table: one row per place the write landed —
+`central`, `alpha`, `beta` — with the old and new value, the outcome, and the store's own error if it
+refused. The rows of one operation share a `change_id`, so a single PATCH reads as one operation with
+three outcomes, and the log keeps a failed store's attempt even after the next sync succeeds.
+Nothing updates or deletes a row: `sku` deliberately carries no foreign key, so a rename cannot
+rewrite the history it refers to.
+
+```bash
+node backend/scripts/changes.js                  # grouped by operation, newest first
+node backend/scripts/changes.js --sku SKU-007 --limit 20
+curl -s "$API/changes?sku=SKU-007&limit=20"      # the same rows as JSON
+```
 
 ## Run it locally with Docker
 

@@ -1,14 +1,16 @@
 import cors from 'cors';
 import express from 'express';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { config } from './config.js';
 import { imageFilename, sniffImageType } from './images.js';
 import { flagMismatches, mergeLivePrices } from './prices.js';
 import {
   getImage,
   getProduct,
+  listChanges,
   listPrices,
   productExists,
+  recordChange,
   recordSyncResult,
   replaceProductImage,
   updateCentralPrice,
@@ -56,18 +58,49 @@ app.get('/prices', async (req, res) => {
   res.json(flagMismatches(mergeLivePrices(rows, live)));
 });
 
-async function syncStore(sku, store, price) {
+app.get('/changes', async (req, res) => {
+  const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    return res.status(400).json({ error: 'limit must be an integer between 1 and 200' });
+  }
+  const sku = req.query.sku;
+  if (sku !== undefined && !SKU_PATTERN.test(String(sku))) {
+    return res.status(400).json({ error: 'sku must be 1-64 characters of letters, digits, dot, dash or underscore' });
+  }
+  res.json(await listChanges({ limit, sku: sku ?? null }));
+});
+
+async function syncStore(sku, store, price, changeId) {
   let storePrice; // the store's price, once the lookup has told us
   try {
     const variant = await findVariantBySku(sku, store);
     storePrice = variant.price;
     const livePrice = await updateVariantPrice(store, variant, price);
     await recordSyncResult({ store: store.key, sku, status: 'synced', livePrice });
+    await recordChange({
+      changeId,
+      target: store.key,
+      sku,
+      field: 'price',
+      oldValue: storePrice,
+      newValue: livePrice,
+      status: 'synced',
+    });
     return { store: store.key, status: 'synced', error: null };
   } catch (error) {
     const status = storePrice === undefined ? 'failed' : 'mismatch';
     const message = reason(error);
     await recordSyncResult({ store: store.key, sku, status, livePrice: storePrice ?? null, error: message });
+    await recordChange({
+      changeId,
+      target: store.key,
+      sku,
+      field: 'price',
+      oldValue: storePrice ?? null,
+      newValue: price,
+      status,
+      error: message,
+    });
     return { store: store.key, status, error: message };
   }
 }
@@ -85,11 +118,12 @@ app.patch('/prices/:sku', async (req, res) => {
     return res.status(404).json({ error: `unknown sku: ${sku}` });
   }
 
-  const applied = await updateCentralPrice(sku, text);
+  const changeId = randomUUID();
+  const applied = await updateCentralPrice(sku, text, changeId);
 
   const results = [];
   for (const store of stores) {
-    results.push(await syncStore(sku, store, applied));
+    results.push(await syncStore(sku, store, applied, changeId));
   }
 
   const noStoreSynced = results.every((result) => result.status !== 'synced');
@@ -106,15 +140,26 @@ app.get('/images/:sku', async (req, res) => {
   res.type(image.content_type).send(image.bytes);
 });
 
-async function syncImage(sku, store, { filename, bytes, contentType, alt }) {
+async function syncImage(sku, store, { filename, bytes, contentType, alt }, changeId) {
   try {
     const { productId } = await findVariantBySku(sku, store);
     const held = (await productMedia(store, productId)).filter((node) => node.mediaContentType === 'IMAGE');
     if (held.length > 0) await deleteMediaFiles(store, held.map((node) => node.id));
     const node = await addProductImage(store, productId, { filename, bytes, contentType, alt });
+    await recordChange({
+      changeId,
+      target: store.key,
+      sku,
+      field: 'image',
+      oldValue: held.length > 0 ? held.map((media) => media.id).join(', ') : 'none',
+      newValue: node.id,
+      status: 'synced',
+    });
     return { store: store.key, status: 'synced', error: null, media: node.image?.url ?? null };
   } catch (error) {
-    return { store: store.key, status: 'failed', error: reason(error) };
+    const message = reason(error);
+    await recordChange({ changeId, target: store.key, sku, field: 'image', newValue: alt, status: 'failed', error: message });
+    return { store: store.key, status: 'failed', error: message };
   }
 }
 
@@ -137,25 +182,50 @@ app.put('/images/:sku', express.raw({ type: () => true, limit: '8mb' }), async (
 
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   const filename = imageFilename(product.name, contentType);
-  await replaceProductImage({ sku, bytes, contentType, sha256, filename });
+  const changeId = randomUUID();
+  await replaceProductImage({ sku, bytes, contentType, sha256, filename }, changeId);
 
   const results = [];
   for (const store of stores) {
-    results.push(await syncImage(sku, store, { filename, bytes, contentType, alt: product.name }));
+    results.push(await syncImage(sku, store, { filename, bytes, contentType, alt: product.name }, changeId));
   }
 
   const noStoreSynced = results.every((result) => result.status !== 'synced');
   return res.status(noStoreSynced ? 502 : 200).json({ sku, sha256, bytes: bytes.length, stores: results });
 });
 
-async function syncDetails(store, { from, to, name }) {
+async function syncDetails(store, { from, to, name }, changeId) {
   try {
-    const { variantId, productId } = await findVariantBySku(from, store);
-    if (to !== from) await updateVariantSku(store, { variantId, productId }, to);
-    await updateProductTitle(store, productId, name);
+    const variant = await findVariantBySku(from, store);
+    if (to !== from) await updateVariantSku(store, { variantId: variant.variantId, productId: variant.productId }, to);
+    await updateProductTitle(store, variant.productId, name);
+    if (variant.title !== name) {
+      await recordChange({
+        changeId,
+        target: store.key,
+        sku: to,
+        field: 'name',
+        oldValue: variant.title,
+        newValue: name,
+        status: 'synced',
+      });
+    }
+    if (variant.sku !== to) {
+      await recordChange({
+        changeId,
+        target: store.key,
+        sku: to,
+        field: 'sku',
+        oldValue: variant.sku,
+        newValue: to,
+        status: 'synced',
+      });
+    }
     return { store: store.key, status: 'synced', error: null };
   } catch (error) {
-    return { store: store.key, status: 'failed', error: reason(error) };
+    const message = reason(error);
+    await recordChange({ changeId, target: store.key, sku: from, field: 'name', newValue: name, status: 'failed', error: message });
+    return { store: store.key, status: 'failed', error: message };
   }
 }
 
@@ -184,11 +254,12 @@ app.patch('/products/:sku', async (req, res) => {
     return res.status(409).json({ error: `sku already in use: ${targetSku}` });
   }
 
-  const applied = await updateProductDetails(sku, { sku: targetSku, name: name ?? current.name });
+  const changeId = randomUUID();
+  const applied = await updateProductDetails(sku, { sku: targetSku, name: name ?? current.name }, changeId);
 
   const results = [];
   for (const store of stores) {
-    results.push(await syncDetails(store, { from: sku, to: applied.sku, name: applied.name }));
+    results.push(await syncDetails(store, { from: sku, to: applied.sku, name: applied.name }, changeId));
   }
 
   const noStoreSynced = results.every((result) => result.status !== 'synced');

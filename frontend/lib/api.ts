@@ -22,6 +22,14 @@ export async function updatePrice(sku: string, price: string) {
   return response.json();
 }
 
+export async function getChanges(limit = 20) {
+  const response = await fetch(`${API_URL}/changes?limit=${limit}`);
+  if (!response.ok) {
+    throw new Error(`GET /changes failed: HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
 export function imageUrl(sku: string, version: string) {
   return `${PUBLIC_API_URL}/images/${encodeURIComponent(sku)}?v=${version}`;
 }

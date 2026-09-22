@@ -54,3 +54,24 @@ alter table store_sync_status add constraint store_sync_status_sku_fkey
 alter table product_images drop constraint if exists product_images_sku_fkey;
 alter table product_images add constraint product_images_sku_fkey
   foreign key (sku) references products (sku) on update cascade on delete cascade;
+
+-- Append-only audit trail: one row per place a write landed (the central row, Store A, Store B), the
+-- rows of one operation sharing a `change_id`. Deliberately no foreign key on `sku` and nothing that
+-- cascades: a rename must not rewrite history, so the log records what the values were at the time.
+-- `target` is left unconstrained because it is a store key from configuration, not a fixed vocabulary.
+create table if not exists change_log (
+  id        bigserial   primary key,
+  change_id uuid        not null,
+  at        timestamptz not null default now(),
+  target    text        not null,
+  sku       text        not null,
+  field     text        not null check (field in ('price', 'name', 'sku', 'image')),
+  old_value text,
+  new_value text,
+  status    text        not null check (status in ('applied', 'synced', 'mismatch', 'failed')),
+  error     text
+);
+
+create index if not exists change_log_at_idx on change_log (at desc);
+create index if not exists change_log_sku_at_idx on change_log (sku, at desc);
+create index if not exists change_log_change_id_idx on change_log (change_id);

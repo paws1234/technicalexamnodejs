@@ -68,12 +68,12 @@ export async function findVariantBySku(sku, store) {
   // `product { id }` is selected because `productVariantsBulkUpdate` addresses the product; JSON.stringify escapes the SKU safely.
   const data = await adminGraphql(
     store,
-    `{ productVariants(first: 1, query: ${JSON.stringify(`sku:${sku}`)}) { edges { node { id price product { id } } } } }`,
+    `{ productVariants(first: 1, query: ${JSON.stringify(`sku:${sku}`)}) { edges { node { id price sku product { id title } } } } }`,
   );
 
   const node = data?.productVariants?.edges?.[0]?.node;
   if (!node) throw new Error(`${store.key}: no variant found for sku ${sku}`);
-  return { variantId: node.id, productId: node.product.id, price: node.price };
+  return { variantId: node.id, productId: node.product.id, price: node.price, sku: node.sku, title: node.product.title };
 }
 
 // Every variant in one call as sku -> price; ponytail: the first 250 only — a bigger store would need paging.
