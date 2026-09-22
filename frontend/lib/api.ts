@@ -1,18 +1,11 @@
-// The backend's address, which differs by caller: the browser uses the public origin —
-// NEXT_PUBLIC_API_URL, or nothing at all, which makes the paths relative and works whenever the
-// dashboard and the API share one deployment — while a server component runs *inside* the
-// deployment and reaches the API on an internal address (`API_URL`: docker-compose sets
-// `http://backend:3000`, Vercel Services injects it from a binding). Without it the server-side
-// fetch would go to `localhost` inside its own container. NEXT_PUBLIC_* is inlined at build time,
-// so repointing the dashboard is an env change. Nothing secret belongs here — it ships to the browser.
+// Browser uses the public origin (empty = relative paths); a server component uses the internal API_URL Vercel injects.
 const PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
 const API_URL = (typeof window === 'undefined' ? process.env.API_URL ?? PUBLIC_API_URL : PUBLIC_API_URL).replace(
   /\/+$/,
   '', // a service binding hands over a base URL; trim any trailing slash so joins stay honest
 );
 
-// The status is checked before the body is returned, so a backend that is down or erroring cannot
-// reach the table as an empty catalogue.
+// Checked before the body, so a backend that is down cannot reach the table as an empty catalogue.
 export async function getPrices() {
   const response = await fetch(`${API_URL}/prices`);
   if (!response.ok) {
@@ -21,8 +14,7 @@ export async function getPrices() {
   return response.json();
 }
 
-// The body comes back as-is whatever the status, because both outcomes are readable: 200 and 502
-// both carry `stores[]` with each store's result, and a rejected request carries `error` instead.
+// The body comes back as-is whatever the status: 200 and 502 both carry `stores[]`, a rejection carries `error`.
 export async function updatePrice(sku: string, price: string) {
   const response = await fetch(`${API_URL}/prices/${encodeURIComponent(sku)}`, {
     method: 'PATCH',
@@ -32,15 +24,12 @@ export async function updatePrice(sku: string, price: string) {
   return response.json();
 }
 
-// A URL the *browser* follows — a server-rendered <img src> is opened by the browser, never by the
-// render that wrote it — so this base is the public one on both sides. `version` is the stored
-// hash: a replaced image is a different URL, which is what stops the old bytes being reused.
+// A URL the *browser* follows, so it uses the public base; `version` is the stored hash, which makes a replaced image a new URL.
 export function imageUrl(sku: string, version: string) {
   return `${PUBLIC_API_URL}/images/${encodeURIComponent(sku)}?v=${version}`;
 }
 
-// The dashboard's other two editable fields, in the same PATCH. Same return contract as
-// updatePrice: `error` for a rejected edit, `stores[]` for one the stores answered.
+// Same return contract as updatePrice: `error` for a rejected edit, `stores[]` for one the stores answered.
 export async function updateProduct(sku: string, changes: { sku: string; name: string }) {
   const response = await fetch(`${API_URL}/products/${encodeURIComponent(sku)}`, {
     method: 'PATCH',
@@ -50,9 +39,7 @@ export async function updateProduct(sku: string, changes: { sku: string; name: s
   return response.json();
 }
 
-// The file is the whole body — the backend reads it with `express.raw`, so nothing has to build or
-// parse a multipart form. The declared type is a courtesy: the backend identifies the image from
-// its magic bytes, because a file name the browser does not recognise arrives with no type at all.
+// The file is the whole body (the backend reads it with `express.raw`); the type is a courtesy — magic bytes decide.
 export async function replaceImage(sku: string, file: File) {
   const response = await fetch(`${API_URL}/images/${encodeURIComponent(sku)}`, {
     method: 'PUT',

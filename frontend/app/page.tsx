@@ -5,22 +5,14 @@ import ProductEditor from '@/components/ProductEditor';
 import ProductImage from '@/components/ProductImage';
 import DriftResolver from '@/components/DriftResolver';
 
-// One grid serves both widths: `lg:contents` dissolves each label/value wrapper at the breakpoint, so
-// a phone and a tablet see labelled lines and a wide screen sees eight aligned columns — a fixed
-// table would scroll sideways at 375px, and the eight columns need real width or the item name
-// wraps to three lines. The first column is the thumbnail, the last is the price editor.
+// One grid for both widths: `lg:contents` dissolves each label/value wrapper, so a phone sees labelled lines and a desktop sees columns.
 const COLS =
   'lg:grid-cols-[2.75rem_4.5rem_minmax(0,1fr)_5rem_7rem_7rem_11rem] lg:items-center lg:gap-4';
 const ROW = `grid gap-1.5 py-3 lg:py-2 ${COLS}`;
 const CELL = 'grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2 lg:contents';
 const LABEL = 'text-xs uppercase tracking-wide text-gray-500 lg:hidden';
 
-// A store entry can be absent — the endpoint reports `stores: {}` for a SKU no store has reported
-// on — so the cells read it optionally rather than crashing on the one row that has no status yet.
-// `image` is null for a SKU with no stored image, which is what the thumbnail's placeholder is for.
-// `live_price` is what the store was read holding on this request, which is what the resolver offers
-// as the alternative to the central price. `has_mismatch` is the backend's own verdict and is what
-// decides whether the row gets a resolver, so the rule lives in one place.
+// A store entry can be absent and `image` null, so both are read optionally; `has_mismatch` is the backend's verdict.
 type PriceRow = {
   sku: string;
   name: string;
@@ -33,10 +25,7 @@ type PriceRow = {
   };
 };
 
-// Rendered per request rather than prerendered at build time, so the table shows what the stores
-// hold now: otherwise a deployed dashboard would serve build-time prices for ever and
-// `router.refresh()` would re-fetch that same frozen payload. The check is `next build`'s route
-// table, which must read `ƒ /` rather than `○ /`.
+// Per request, not prerendered, or a deployed dashboard would serve build-time prices for ever (`next build` must show `ƒ /`).
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
@@ -86,8 +75,7 @@ export default async function Home() {
               <span className={LABEL}>Update</span>
               <PriceEditor sku={p.sku} price={p.central_price} />
             </div>
-            {/* Only on a row the backend flagged, and above the editor: the two prices in front of
-                the operator already disagree, so the decision comes before another manual entry. */}
+            {/* Only on a flagged row, above the editor: the two prices already disagree, so the decision comes first. */}
             {p.has_mismatch && <DriftResolver sku={p.sku} central={p.central_price} stores={p.stores} />}
             {/* A grid child of the row rather than of a cell, so its editor spans the full width
                 below the row instead of the 11rem action column. */}

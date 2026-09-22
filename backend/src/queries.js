@@ -10,9 +10,7 @@ export async function getProduct(sku) {
   return rows[0] ?? null;
 }
 
-// The dashboard's edit of the two text fields. A changed SKU is a natural-key update, and the two
-// child tables follow it (`on update cascade`, seed/schema.sql), so one statement keeps the
-// catalogue, the sync log and the stored image pointing at the same product.
+// A changed SKU is a natural-key update; both child tables carry `on update cascade`, so one statement follows it.
 export async function updateProductDetails(sku, { sku: nextSku, name }) {
   const { rows } = await pool.query(
     'update products set sku = $1, name = $2, updated_at = now() where sku = $3 returning sku, name, price',
@@ -29,9 +27,7 @@ export async function getImage(sku) {
   return rows[0] ?? null;
 }
 
-// A dashboard upload replaces the row outright: the bytes it holds are the ones the stores carry,
-// so the provenance columns describe *these* bytes — a fetch from Openverse that is overwritten
-// stops claiming a provider it no longer came from.
+// Replaced outright: the provenance columns must describe the bytes the stores now carry, not the fetched ones.
 export async function replaceProductImage({ sku, bytes, contentType, sha256, filename }) {
   const { rows } = await pool.query(
     `insert into product_images
@@ -49,8 +45,7 @@ export async function replaceProductImage({ sku, bytes, contentType, sha256, fil
   return rows[0];
 }
 
-// `returning price` hands back what the database stored rather than what was sent, so the response
-// and the sync log report the same numeric(10,2) string the row holds.
+// `returning price` reports what the row stores (a numeric(10,2) string), not what was sent.
 export async function updateCentralPrice(sku, price) {
   const { rows } = await pool.query(
     'update products set price = $1, updated_at = now() where sku = $2 returning price',
@@ -59,8 +54,7 @@ export async function updateCentralPrice(sku, price) {
   return rows[0].price;
 }
 
-// `on conflict` means a SKU is described by its latest attempt rather than by every attempt it
-// ever had.
+// `on conflict`: a SKU keeps its latest attempt, not every attempt it ever had.
 export async function recordSyncResult({ store, sku, status, livePrice = null, error = null }) {
   await pool.query(
     `insert into store_sync_status (store, sku, live_price, status, last_synced_at, error)
@@ -74,11 +68,7 @@ export async function recordSyncResult({ store, sku, status, livePrice = null, e
   );
 }
 
-// Three flat queries rather than a SQL join: `products` is the list and the status rows are sparse,
-// so grouping them is a Map lookup. numeric(10,2) comes back from pg as a string, which is what
-// makes central_price and live_price compare exactly, with no float rounding in between. The image
-// is reported as its hash rather than its bytes — the dashboard renders it from `/images/:sku` and
-// uses the hash to make a replaced image a different URL.
+// Three flat queries grouped in JS (the status rows are sparse); the image ships as its hash, which the dashboard turns into `/images/:sku?v=`.
 export async function listPrices() {
   const [products, statuses, images] = await Promise.all([
     pool.query('select sku, name, price from products order by sku'),

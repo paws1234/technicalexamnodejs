@@ -1,11 +1,4 @@
-// Product images: searched by the product's own name from a free photo index, stored in Supabase.
-//
-// Openverse is keyless and exposes a licence filter, which is what makes publishing the result
-// defensible: only licences allowing commercial use and modification are requested, and each row
-// keeps the creator and the licence. The bytes are stored rather than the URL, because the sync has
-// to hand Shopify a file and a re-run must not search again.
-// ponytail: Openverse's anonymous limit is 20 req/min and 200/day (measured 2026-09-20), fine for a
-// one-time fetch of ten SKUs. Upgrade: a registered client, or a longer-lived provider cache.
+// Images come from Openverse (keyless, licence-filtered; ponytail: 20 req/min anonymous), stored as bytes so a re-run never searches again.
 import { createHash } from 'node:crypto';
 import { pool } from './db.js';
 
@@ -16,21 +9,16 @@ const LICENSES = 'cc0,pdm,by,by-sa'; // commercial use + modification; excludes 
 const USER_AGENT = 'price-sync-demo/1.0 (technical exam; contact: pawsmedz@gmail.com)';
 // Below this on the shorter edge a result is a thumbnail crop or an icon, not a product photo.
 const MIN_EDGE = 400;
-// Trailing words that carry no image-search meaning: "Ceramic Pour-Over Set" has to search
-// "pour-over", because "set" matches little but sunset, dataset and set theory.
+// Trailing words that carry no search meaning: "Ceramic Pour-Over Set" has to search "pour-over".
 const GENERIC = new Set(['set', 'kit', 'pack', 'bundle', 'piece', 'pieces']);
-// A museum scan or a diagram can satisfy a word search while showing no product at all — the Met's
-// engraving "Design Gothic Desk Tray" and NASA's labelled satellite maps both arrive that way, and
-// they carry the tag that gives them away.
+// A scan or a diagram satisfies a word search while showing no product, so tags like these disqualify a result.
 const NOT_A_PHOTO = new Set([
   'drawing', 'drawings', 'sketch', 'sketches', 'engraving', 'engravings', 'illustration',
   'illustrations', 'artwork', 'diagram', 'diagrams', 'map', 'maps', 'poster', 'painting',
   'vector', 'clipart', 'cartoon', 'logo', 'screenshot',
 ]);
 
-// What the bytes actually are, by magic number rather than by the Content-Type a caller claims:
-// the dashboard uploads a file straight from the browser, and Shopify rejects what it cannot decode.
-// The four formats the store accepts and the provider serves.
+// What the bytes are, by magic number rather than the claimed Content-Type; these four formats are what the store accepts.
 export function sniffImageType(bytes) {
   const hex = bytes.subarray(0, 12).toString('hex');
   if (hex.startsWith('ffd8ff')) return 'image/jpeg';
@@ -40,26 +28,20 @@ export function sniffImageType(bytes) {
   return null;
 }
 
-// The name the store's image URL is built from: the product name, with the extension taken from
-// the type actually served or sniffed (the provider does mix formats — SKU-006 is WebP).
+// The store's filename comes from the product name, with the extension of the type actually served.
 export function imageFilename(name, contentType) {
   const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }[contentType] ?? 'jpg';
   return `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}.${extension}`;
 }
 
-// "Aero Travel Mug" -> ["Travel Mug", "Mug"]: the leading brand adjective is what makes an image
-// search miss ("Aero" is a vacuum-insulated brand; photographs are titled with the noun phrase), so
-// the last two words are searched first and the last one alone is the fallback. Parentheticals,
-// digits and a trailing generic noun drop out with them.
+// "Aero Travel Mug" -> ["Travel Mug", "Mug"]: the leading brand adjective is what makes a search miss.
 export function searchTerms(name) {
   const words = name.replace(/\(.*?\)/g, ' ').split(/\s+/).filter((word) => /^[a-z][a-z-]{2,}$/i.test(word));
   while (words.length > 1 && GENERIC.has(words.at(-1).toLowerCase())) words.pop();
   return [...new Set([words.slice(-2).join(' '), words.at(-1)])].filter(Boolean);
 }
 
-// Whole words only: "set" must not match "Sunset", which is how a satellite photo of Alaska was
-// once picked for a coffee set. A hyphenated word also matches the squashed form, so "pour-over"
-// finds the tag "pourover".
+// Whole words only ("set" must not match "Sunset"); a hyphenated word also matches its squashed form.
 function hasWords(text, words) {
   const lowered = text.toLowerCase();
   const tokens = new Set(lowered.replace(/[^a-z0-9]+/g, ' ').split(' ').filter(Boolean));
@@ -72,11 +54,7 @@ function hasWords(text, words) {
   );
 }
 
-// The title and the photographer's tags together, or the tags alone. The two are worth keeping
-// apart: a title can name something the photo does not show (Openverse's top hit for "travel mug"
-// is titled "Canon Zoom Lens EF 70-200mm f/4 L USM Travel Mug" and photographs a lens), and tags
-// can describe the scene rather than the subject ("please give me water" is tagged as an insulated
-// bottle).
+// Title and tags are kept apart: a title can name something the photo does not show, and tags can describe the scene.
 export function mentions(result, term, { tagsOnly = false } = {}) {
   const words = term.toLowerCase().split(' ');
   if (tagsOnly) return hasWords((result.tags ?? []).map((tag) => tag.name ?? tag).join(' '), words);
@@ -89,8 +67,7 @@ export function mentions(result, term, { tagsOnly = false } = {}) {
 // A mention in the title alone — the stronger kind, since it names the object.
 const mentionsTitle = (result, term) => hasWords(result.title ?? '', term.toLowerCase().split(' '));
 
-// The results for one term with artwork and unusably small ones removed, so the caller only ever
-// ranks results that could be a product image.
+// One term's results with artwork and unusably small ones removed, so only rankable candidates remain.
 async function candidates(term) {
   const url = new URL(SEARCH_ENDPOINT);
   url.search = new URLSearchParams({ q: term, license: LICENSES, page_size: '20', mature: 'false' });
@@ -108,14 +85,10 @@ async function candidates(term) {
   return large.length > 0 ? large : usable;
 }
 
-// Tags and titles use the singular ("Geometric Felt Coaster DIY"), and the plural term's own result
-// list does not reliably contain that photo.
+// Tags and titles use the singular ("Geometric Felt Coaster DIY"), which the plural term's own results may lack.
 const singularize = (term) => term.split(' ').map((word) => word.replace(/s$/, '')).join(' ');
 
-// Of the results that mention the term, the shortest title wins: a photo titled "Travel mug" is a
-// travel mug, "Canon Zoom Lens EF … Travel Mug" is a lens. A title mention outranks a tag-only one,
-// because tags may describe the scene rather than the subject; the provider's own order breaks ties
-// and the sort is stable.
+// The shortest title wins: "Travel mug" is one, "Canon Zoom Lens … Travel Mug" is a lens; a title mention outranks a tag-only one.
 export function pickBest(pool, term) {
   const byTitleThenLength = (left, right) =>
     Number(!mentionsTitle(left, term)) - Number(!mentionsTitle(right, term)) ||
@@ -123,9 +96,7 @@ export function pickBest(pool, term) {
   return pool.filter((result) => mentions(result, term)).sort(byTitleThenLength)[0] ?? null;
 }
 
-// The provider's own copy is the real photo (~1024px). The thumbnail is the safety net for a dead
-// upstream link — the copyright holder's host is not ours to depend on, and a 600px JPEG beats
-// failing the whole SKU.
+// The provider's own copy is the real photo (~1024px); the thumbnail is the fallback for a dead upstream link.
 async function download(primary, fallback) {
   for (const url of [primary, fallback].filter(Boolean)) {
     const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
@@ -137,18 +108,12 @@ async function download(primary, fallback) {
   throw new Error(`image download failed for ${primary}`);
 }
 
-// One image per SKU, read from the database when it is already there, so re-running is free.
-//
-// `phrase` overrides the derived terms where the derivation gets them wrong (the index has no
-// coaster under "Coasters" — only roller coasters — and "notebook" alone is a laptop). The chosen
-// photo still has to mention the phrase it was found under, so a phrase cannot smuggle in an
-// unrelated picture.
+// One image per SKU, read back when it is already stored so a re-run is free; `phrase` overrides a derived term.
 export async function ensureImage(sku, name, phrase = null) {
   const { rows } = await pool.query('select * from product_images where sku = $1', [sku]);
   if (rows[0]) return rows[0];
 
-  // Each term and its singular, in order. The first term that matches anything wins, because a
-  // later, weaker match is not an improvement.
+  // Each term and its singular in order: the first that matches anything wins, since a later match is not an improvement.
   const terms = phrase
     ? [phrase, singularize(phrase)]
     : searchTerms(name).flatMap((candidate) => [candidate, singularize(candidate)]);
@@ -176,8 +141,7 @@ export async function ensureImage(sku, name, phrase = null) {
     if (!weak) {
       throw new Error(`no image for "${name}" (searched ${terms.join(', ')})${failure ? `: ${failure.message}` : ''}`);
     }
-    // Nothing described the product: take what the provider ranked first and record its title in
-    // the row, so the choice is visible and replaceable without repeating the search.
+    // Nothing described the product: take the provider's top result and record its title, so the choice stays visible.
     console.warn(`${sku}: no confident image for "${name}" — taking the provider's top result "${weak.result.title ?? '?'}"`);
     matched = weak;
   }

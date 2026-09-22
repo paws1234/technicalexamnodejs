@@ -1,6 +1,4 @@
-// The local entry point, and the one the compose `backend` service runs. Vercel has no default
-// entry point for Express, so the deployed path is backend/api/index.js — both hand over the same
-// app object, which is why app.js itself never listens.
+// The local entry (the compose `backend` service); Vercel uses backend/api/index.js — same app object.
 import { app } from './app.js';
 import { config } from './config.js';
 

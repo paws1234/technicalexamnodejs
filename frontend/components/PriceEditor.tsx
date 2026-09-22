@@ -4,9 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { updatePrice } from '@/lib/api';
 
-// One numeric input per row, pre-filled with the central price, PATCHed through lib/api so the base
-// URL stays in one place. A <form> so Enter submits too, and the button is disabled while the
-// request is in flight so a double click cannot send the same price twice.
+// PATCHes through lib/api so the base URL stays in one place; the button is disabled while in flight.
 export default function PriceEditor({ sku, price }: { sku: string; price: string }) {
   const [value, setValue] = useState(price);
   const [pending, setPending] = useState(false);
@@ -18,18 +16,15 @@ export default function PriceEditor({ sku, price }: { sku: string; price: string
     setPending(true);
     try {
       const result = await updatePrice(sku, value);
-      // Both failure shapes are reported rather than a generic "failed": a rejected request carries
-      // `error`, an accepted one carries `stores[]` with each store's own reason.
+      // Both failure shapes are reported: a rejected request carries `error`, an accepted one carries `stores[]`.
       if (result.error) {
         setMessage(result.error);
       } else {
-        // Declared rather than left `any`: `updatePrice` returns the body as-is and `next build`
-        // typechecks, so an untyped callback fails the build.
+        // Declared rather than left `any`, because next build typechecks and `updatePrice` returns the body as-is.
         const stores: { store: string; status: string; error?: string | null }[] = result.stores ?? [];
         const failed = stores.filter((s) => s.status !== 'synced');
         setMessage(failed.length ? failed.map((s) => `${s.store}: ${s.error ?? s.status}`).join(' · ') : null);
-        // Re-runs this page's server component instead of duplicating the fetch here. Skipped for a
-        // rejected request, where nothing changed.
+        // Re-runs the page's server component instead of duplicating the fetch here.
         router.refresh();
       }
     } finally {

@@ -26,12 +26,10 @@ import {
 } from './shopify.js';
 import { stores } from './stores.js';
 
-// Leading digit required, so `-1`, `1e3` and an empty body all fail one test; `\.\d{1,2}` rejects
-// the third decimal.
+// A leading digit is required (so `-1`, `1e3` and an empty body fail) and `\.\d{1,2}` rejects a third decimal.
 const PRICE_PATTERN = /^\d+(\.\d{1,2})?$/;
 
-// A SKU is used as a GraphQL query term, a Shopify inventory key and a URL path, so it is kept to
-// characters no layer has to escape.
+// A SKU travels as a GraphQL term, an inventory key and a URL path, so it avoids characters any layer must escape.
 const SKU_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const MAX_NAME_LENGTH = 255; // Shopify's own title limit
 
@@ -48,12 +46,7 @@ app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
-// Two Admin API reads per request, not twenty: the rows carry what the stores hold *now*, so a price
-// changed straight in a Shopify admin is flagged on the next page load instead of hiding behind the
-// last recorded value. A store that cannot be read is reported as `failed` on every row — the
-// catalogue itself is still available, so that stays a 200.
-//
-// A rejected query reaches the error handler below by itself (Express 5).
+// Two Admin API reads per request, not twenty; an unreadable store is `failed` on every row, and Express 5 forwards rejections itself.
 app.get('/prices', async (req, res) => {
   const rows = await listPrices();
   const live = await Promise.all(
@@ -68,8 +61,7 @@ app.get('/prices', async (req, res) => {
   res.json(flagMismatches(mergeLivePrices(rows, live)));
 });
 
-// One store's half of the sync. Its failure is recorded and returned here, never thrown, so the
-// other store's branch still runs to completion.
+// One store's half of the sync: its failure is returned, never thrown, so the other store still runs.
 async function syncStore(sku, store, price) {
   let storePrice; // the store's price, once the lookup has told us
   try {
@@ -79,8 +71,7 @@ async function syncStore(sku, store, price) {
     await recordSyncResult({ store: store.key, sku, status: 'synced', livePrice });
     return { store: store.key, status: 'synced', error: null };
   } catch (error) {
-    // `failed` when even the lookup failed, so the store's price is unknown; `mismatch` when the
-    // write failed after the lookup revealed the store holds something else.
+    // `failed` when the lookup itself failed (price unknown); `mismatch` when the write failed after it.
     const status = storePrice === undefined ? 'failed' : 'mismatch';
     const message = reason(error);
     await recordSyncResult({ store: store.key, sku, status, livePrice: storePrice ?? null, error: message });
@@ -88,13 +79,11 @@ async function syncStore(sku, store, price) {
   }
 }
 
-// ponytail: no authentication on this route (assumption 6 records it as a known risk). Upgrade: a
-// token check in front of it.
+// ponytail: no authentication (a recorded risk). Upgrade: a token check in front of this route.
 app.patch('/prices/:sku', async (req, res) => {
   const { sku } = req.params;
   const price = req.body?.price;
-  // A JSON number or the string form of one — "19.99" is how prices are spelled everywhere else
-  // here, and pg hands numeric(10,2) back as a string too.
+  // Accepts a JSON number or its string form, which is how pg hands numeric(10,2) back.
   const text = typeof price === 'number' ? String(price) : price;
   if (typeof text !== 'string' || !PRICE_PATTERN.test(text)) {
     return res.status(400).json({ error: 'price must be a non-negative number with at most 2 decimals' });
@@ -111,20 +100,12 @@ app.patch('/prices/:sku', async (req, res) => {
     results.push(await syncStore(sku, store, applied));
   }
 
-  // A store that failed is worth reporting, not worth failing the request: the central price is
-  // saved either way, so only "no store took it" is an error.
+  // The central price is saved either way, so only "no store took it" is an error worth a 502.
   const noStoreSynced = results.every((result) => result.status !== 'synced');
   return res.status(noStoreSynced ? 502 : 200).json({ sku, price: applied, stores: results });
 });
 
-// The stored image bytes, which is what the dashboard's <img> fetches.
-//
-// The URL is content-addressed (`?v=<sha256>`), so the bytes behind a given URL can never change:
-// the cache is told it may keep them for a year and never revalidate. That is what stops ten
-// thumbnails per page view — eleven connections with the page's own query — from being eleven
-// database connections every time, because the edge answers a cached image without invoking this
-// function at all. A replaced image is uploaded under a *new* hash and therefore a new URL, so
-// nothing here can go stale. The ETag is kept for a client that revalidates anyway.
+// The stored image bytes; the URL is content-addressed, so the cache may keep it for a year — a replaced image is a new hash.
 app.get('/images/:sku', async (req, res) => {
   const image = await getImage(req.params.sku);
   if (!image) {
@@ -135,9 +116,7 @@ app.get('/images/:sku', async (req, res) => {
   res.type(image.content_type).send(image.bytes);
 });
 
-// One store's half of an image replacement. The media the product already holds is deleted first:
-// a product reports two images otherwise and the store shows whichever it prefers, and deleting is
-// also what makes the retry path the same request rather than a clean-up.
+// One store's half of an image replacement: the old media goes first, so a product never holds two images.
 async function syncImage(sku, store, { filename, bytes, contentType, alt }) {
   try {
     const { productId } = await findVariantBySku(sku, store);
@@ -150,11 +129,7 @@ async function syncImage(sku, store, { filename, bytes, contentType, alt }) {
   }
 }
 
-// The uploaded file *is* the request body (`express.raw`), because a browser hands over a File and
-// there is no reason to wrap it in a multipart form or a base64 string that only has to be undone
-// here. Any Content-Type is accepted, because the declared type is only as good as the file's
-// extension — a browser reports `''` for a name it does not recognise — while `sniffImageType`
-// reads the magic bytes, which is the claim Shopify will actually test.
+// The file *is* the request body (`express.raw`); any Content-Type is accepted — `sniffImageType` reads the magic bytes instead.
 app.put('/images/:sku', express.raw({ type: () => true, limit: '8mb' }), async (req, res) => {
   const { sku } = req.params;
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
@@ -181,15 +156,12 @@ app.put('/images/:sku', express.raw({ type: () => true, limit: '8mb' }), async (
     results.push(await syncImage(sku, store, { filename, bytes, contentType, alt: product.name }));
   }
 
-  // Same shape as the price route: the image is stored either way, so only "neither store took it"
-  // is an error worth a 502.
+  // Same shape as the price route: the image is stored either way, so only "neither store took it" is a 502.
   const noStoreSynced = results.every((result) => result.status !== 'synced');
   return res.status(noStoreSynced ? 502 : 200).json({ sku, sha256, bytes: bytes.length, stores: results });
 });
 
-// One store's half of a product edit. The SKU moves before the title, because the SKU is what every
-// later lookup searches on: a store that fails here is the one whose next price sync will report
-// "no variant found", and the response says which store that is.
+// The SKU moves before the title: it is what every later lookup searches on, and a failure here names the store.
 async function syncDetails(store, { from, to, name }) {
   try {
     const { variantId, productId } = await findVariantBySku(from, store);
@@ -201,9 +173,7 @@ async function syncDetails(store, { from, to, name }) {
   }
 }
 
-// The two fields the dashboard edits that are not the price. A renamed SKU is the interesting case:
-// it is the catalogue's primary key *and* the key the stores are searched by, so the central row is
-// renamed first (both child tables follow it) and then each store's variant is moved to match.
+// A renamed SKU is the catalogue's key *and* the stores' lookup key: the central row moves first, both child tables follow it, then each store.
 app.patch('/products/:sku', async (req, res) => {
   const { sku } = req.params;
   const body = req.body ?? {};
@@ -225,9 +195,7 @@ app.patch('/products/:sku', async (req, res) => {
     return res.status(404).json({ error: `unknown sku: ${sku}` });
   }
   const targetSku = nextSku ?? sku;
-  // 409 rather than letting the primary key raise: a name nobody can place is worse than a
-  // conflict the dashboard can show. A retry of a rename the stores did not take sends the SKU it
-  // already has, which is why the same value is not a conflict.
+  // 409 rather than letting the primary key raise; sending the SKU the row already has is not a conflict, so a retry works.
   if (targetSku !== sku && (await productExists(targetSku))) {
     return res.status(409).json({ error: `sku already in use: ${targetSku}` });
   }
@@ -248,19 +216,13 @@ app.patch('/products/:sku', async (req, res) => {
   });
 });
 
-// Four arguments is what marks this as Express's error handler; without it a malformed JSON body
-// answers with Express's HTML stack trace instead of JSON.
+// Four arguments is what marks Express's error handler; without it a malformed body gets an HTML stack trace.
 app.use((err, req, res, next) => {
   const status = err.status ?? 500;
-  // A 5xx is a bug or an outage rather than a bad request, so it goes to the log — the caller only
-  // gets a generic message, and this is the one place the real reason is written down.
+  // A 5xx goes to the log — the one place the real reason is written down; the caller gets a generic message.
   if (status >= 500) console.error(`${req.method} ${req.originalUrl}:`, err);
-  // A client error keeps its message so the caller can fix the request; a server error does not,
-  // so a database or Shopify failure cannot leak its internals.
+  // A client error keeps its message; a server error does not, so a failure here leaks no internals.
   res.status(status).json({ error: status < 500 ? err.message : 'Internal server error' });
 });
 
-// Vercel's Express entry has to default-export the app or listen. `src/app.js` is checked before
-// `src/server.js` and does neither, so without this line every deployed request answers 500
-// "Invalid export found … The default export must be a function or server".
 export default app;

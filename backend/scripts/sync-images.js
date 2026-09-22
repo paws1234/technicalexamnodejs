@@ -1,12 +1,5 @@
 #!/usr/bin/env node
-// Puts a product image on every SKU, in both stores, from the copy Supabase holds.
-//
-//   node backend/scripts/sync-images.js               # fetch what is missing, then sync both stores
-//   node backend/scripts/sync-images.js --self-check  # offline: the search-term and matching logic
-//
-// Re-runnable by design: an image is fetched once and then read from `product_images`, and a store
-// already carrying it (matched on the alt text, which is the product name) is left alone — so a
-// second run is the verification pass, on a fresh read from each store rather than this run's output.
+// Puts a product image on every SKU in both stores; re-runnable, so a second run is the verification pass.
 import assert from 'node:assert/strict';
 import { pool } from '../src/db.js';
 import { ensureImage, imageFilename, mentions, pickBest, searchTerms, sniffImageType } from '../src/images.js';
@@ -14,10 +7,7 @@ import { listPrices } from '../src/queries.js';
 import { addProductImage, findVariantBySku, productMedia, waitForMedia } from '../src/shopify.js';
 import { stores } from '../src/stores.js';
 
-// The phrases the derived terms get wrong, because the keyless index holds no photograph of the
-// object under those words: "Coasters" is roller coasters, "Field Notebook" is people writing in
-// one. Every other product uses the derived terms, and a photo chosen under a phrase still has to
-// mention it, so a phrase cannot smuggle in a wrong picture.
+// Phrases the derivation gets wrong, because the index holds no photo of the object under those words.
 const SEARCH_PHRASES = {
   'SKU-002': 'paper notebook', // "notebook" alone is a laptop
   'SKU-005': 'coffee dripper',
@@ -25,8 +15,7 @@ const SEARCH_PHRASES = {
   'SKU-010': 'reading lamp', // "desk lamp" returned a blurry 29KB shot
 };
 
-// The pure half of the pipeline, asserted against the seed catalogue and the two bad matches this
-// run actually produced. No network, no database.
+// The pure half of the pipeline, asserted against the seed catalogue and the two bad matches it produced.
 function selfCheck() {
   assert.deepEqual(searchTerms('Aero Travel Mug'), ['Travel Mug', 'Mug'], 'brand adjective dropped');
   assert.deepEqual(searchTerms('Insulated Bottle 750ml'), ['Insulated Bottle', 'Bottle'], 'digits dropped');
@@ -34,12 +23,10 @@ function selfCheck() {
   assert.deepEqual(searchTerms('Ceramic Pour-Over Set'), ['Ceramic Pour-Over', 'Pour-Over'], 'trailing "Set" dropped');
   assert.deepEqual(searchTerms('Apron'), ['Apron'], 'one word stays one term');
 
-  // The satellite photo of Alaska that a "Pour-Over Set" search returned: "set" must not match
-  // "Sunset", which is what whole-word matching is for.
+  // The Alaska satellite photo a "Pour-Over Set" search returned: "set" must not match "Sunset".
   assert.equal(mentions({ title: 'Sunset over the Chukchi Sea', tags: [] }, 'pour-over set'), false);
   assert.equal(mentions({ title: 'Iced pour-over coffee', tags: [] }, 'pour-over'), true);
-  // The lens photo titled "... Travel Mug": the title alone would pass, the photographer's tags are
-  // what reject it. Tag-only matching is asked first for exactly this reason.
+  // The lens titled "… Travel Mug": the title passes, the photographer's tags are what reject it.
   const lens = { title: 'Canon Zoom Lens EF 70-200mm f/4 L USM Travel Mug', tags: [{ name: 'canon' }, { name: 'lens' }] };
   assert.equal(mentions(lens, 'travel mug'), true, 'the title does mention it');
   assert.equal(mentions(lens, 'travel mug', { tagsOnly: true }), false, 'the tags do not');
@@ -47,8 +34,7 @@ function selfCheck() {
   assert.equal(mentions({ title: '', tags: [{ name: 'pourover' }] }, 'pour-over'), true, 'a hyphenated term matches its squashed tag');
   assert.equal(mentions({ title: '', tags: [{ name: 'sock' }] }, 'socks'), true, 'a plural term matches its singular tag');
 
-  // Ranking: the shortest title that names the object wins over a longer one that merely mentions
-  // it, and a title that names it beats a result whose tags alone do.
+  // The shortest title that names the object wins, and a title match beats a tags-only one.
   const mug = { title: 'Travel mug', tags: [] };
   assert.equal(pickBest([lens, mug], 'travel mug'), mug, 'the photo titled "Travel mug" wins');
   const insulator = { title: 'old electric line insulators, bottle tree ranch', tags: [{ name: 'insulated' }, { name: 'bottle' }] };
@@ -56,8 +42,7 @@ function selfCheck() {
   assert.equal(pickBest([insulator, flask], 'insulated bottle'), flask, 'a title match beats a tag-only one');
   assert.equal(pickBest([lens], 'insulated bottle'), null, 'no match is null, not a wrong photo');
 
-  // The upload route sniffs the magic bytes of whatever the dashboard sends, so the formats it can
-  // accept are asserted rather than trusted.
+  // The upload route sniffs magic bytes, so the formats it accepts are asserted rather than trusted.
   assert.equal(sniffImageType(Buffer.from('ffd8ffdb', 'hex')), 'image/jpeg');
   assert.equal(sniffImageType(Buffer.from('89504e470d0a1a0a0000000d', 'hex')), 'image/png');
   assert.equal(sniffImageType(Buffer.from('474946383961', 'hex')), 'image/gif');
@@ -88,9 +73,7 @@ for (const { sku, name } of rows) {
 
     for (const store of stores) {
       const { productId } = await findVariantBySku(sku, store);
-      // The product's existing image, whatever its status: this project keeps exactly one per
-      // product, so the check is "is there one" rather than "is there one called what I expect".
-      // Matching on the alt text (the product name) would re-upload for every renamed product.
+      // "Is there an image" rather than "is there one named what I expect": the alt is the product name.
       const held = (await productMedia(store, productId)).find((node) => node.mediaContentType === 'IMAGE');
       if (held?.status === 'READY') {
         outcomes.push(`${sku} ${store.key}: already READY`);

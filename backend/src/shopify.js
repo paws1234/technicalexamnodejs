@@ -1,12 +1,7 @@
-// The Shopify Admin API calls the sync makes, and the token they share.
-//
-// The token is minted here, never read from the environment: admin-created custom apps can no
-// longer be created, so the client credentials grant is the only way to get one (assumption 1).
-// It lasts 24h, so it is cached per store rather than re-minted per request.
+// The Admin API calls the sync makes; the token is minted here rather than read from .env, because admin-created custom apps no longer exist.
 import { config } from './config.js';
 
-// store.key -> { token, expiresAt }. The 5-minute margin keeps a token from expiring between being
-// minted and the call that uses it.
+// store.key -> { token, expiresAt }; the 5-minute margin stops a token expiring between mint and use.
 const tokenCache = new Map();
 
 async function mintToken(store) {
@@ -47,9 +42,7 @@ export async function getAccessToken(store) {
   return token;
 }
 
-// One Admin API POST. GraphQL answers HTTP 200 even when it refuses a field (`Access denied for
-// products field`), so the errors array is checked as well as the status — otherwise a refused
-// query would look like an empty catalogue.
+// GraphQL answers 200 even when it refuses a field, so the errors array is checked as well as the status.
 async function adminGraphql(store, query, variables) {
   const response = await fetch(
     `https://${store.domain}/admin/api/${config.shopifyApiVersion}/graphql.json`,
@@ -76,11 +69,7 @@ async function adminGraphql(store, query, variables) {
 }
 
 export async function findVariantBySku(sku, store) {
-  // `product { id }` comes along because the only variant price-write left in this API version
-  // (`productVariantUpdate` is gone from the Mutation type as of 2026-07) is
-  // `productVariantsBulkUpdate`, which addresses the variant's product rather than the variant.
-  // JSON.stringify produces exactly the escaping a GraphQL string literal accepts, so an odd SKU
-  // cannot break out of the query.
+  // `product { id }` is selected because `productVariantsBulkUpdate` addresses the product; JSON.stringify escapes the SKU safely.
   const data = await adminGraphql(
     store,
     `{ productVariants(first: 1, query: ${JSON.stringify(`sku:${sku}`)}) { edges { node { id price product { id } } } } }`,
@@ -91,16 +80,13 @@ export async function findVariantBySku(sku, store) {
   return { variantId: node.id, productId: node.product.id, price: node.price };
 }
 
-// Every variant on the store in one call, as sku -> price. A dashboard load needs all ten SKUs from
-// both stores, which is why this is not ten findVariantBySku calls.
-// ponytail: the first 250 variants only — this catalogue is 10, a bigger store would need paging.
+// Every variant in one call as sku -> price; ponytail: the first 250 only — a bigger store would need paging.
 export async function readStorePrices(store) {
   const data = await adminGraphql(store, `{ productVariants(first: 250) { nodes { sku price } } }`);
   return new Map((data?.productVariants?.nodes ?? []).map(({ sku, price }) => [sku, price]));
 }
 
-// Takes the object findVariantBySku returned, so the caller never has to know that the product id
-// is part of addressing the variant.
+// Takes what findVariantBySku returned, so the caller need not know the product id addresses the variant.
 export async function updateVariantPrice(store, { variantId, productId }, price) {
   const data = await adminGraphql(
     store,
@@ -127,8 +113,7 @@ export async function updateVariantPrice(store, { variantId, productId }, price)
   return variant.price;
 }
 
-// The product's title is the same field the dashboard shows as the item name, so an edit there has
-// to reach the store or the two disagree about what the product is called.
+// A title edit has to reach the store, or the two disagree about what the product is called.
 export async function updateProductTitle(store, productId, title) {
   const result = (
     await adminGraphql(
@@ -151,9 +136,7 @@ export async function updateProductTitle(store, productId, title) {
   return result.product?.title;
 }
 
-// Renaming a variant's SKU goes through the same bulk mutation as the price, and the SKU is not a
-// field of the variant input itself — it lives on the variant's inventory item, which is why it is
-// nested. `sku` comes back from the store so the caller reports what the store now holds.
+// The SKU lives on the variant's inventory item, which is why it is nested in the bulk-mutation input.
 export async function updateVariantSku(store, { variantId, productId }, sku) {
   const data = await adminGraphql(
     store,
@@ -178,8 +161,7 @@ export async function updateVariantSku(store, { variantId, productId }, sku) {
   return variant.sku;
 }
 
-// The inline fragment is what reaches the `image` field: `media` returns the `Media` interface,
-// which has no `image` of its own.
+// The inline fragment is what reaches `image`: `media` returns the `Media` interface, which has none.
 export async function productMedia(store, productId) {
     const data = await adminGraphql(
         store,
@@ -199,10 +181,7 @@ export async function productMedia(store, productId) {
 const MEDIA_POLL_MS = 1000;
 const MEDIA_ATTEMPTS = 20;
 
-// Processing is asynchronous: a mutation returns as soon as the file is accepted, and `status`
-// moves UPLOADED/PROCESSING -> READY (or FAILED), so reporting success before READY would claim an
-// image the store has not published. Exported because an already-attached media has to be waited
-// for as well — a second run would otherwise add a duplicate next to it.
+// Media processing is asynchronous (UPLOADED -> READY), so success is reported only after the poll.
 export async function waitForMedia(store, productId, mediaId) {
     for (let attempt = 0; attempt < MEDIA_ATTEMPTS; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, MEDIA_POLL_MS));
@@ -215,11 +194,7 @@ export async function waitForMedia(store, productId, mediaId) {
     throw new Error(`${store.key}: media ${mediaId} was still not READY after ${MEDIA_ATTEMPTS}s`);
 }
 
-// Attaching an image is three calls, because the bytes are ours and not a public URL: create a
-// staged upload target, POST the file to it, then point the product at the staged resource.
-// `productCreateMedia` no longer exists in API version 2026-07 — the `media` argument of
-// `productUpdate` replaced it, and `product` has to be named there (an `identifier`-only call is
-// rejected with "must include exactly one of the following arguments: input, product").
+// Three calls: stagedUploadsCreate, POST the file, then `productUpdate` (its `media` arg replaced `productCreateMedia`).
 export async function addProductImage(store, productId, { filename, bytes, contentType, alt }) {
     const staged = (
         await adminGraphql(
@@ -244,8 +219,7 @@ export async function addProductImage(store, productId, { filename, bytes, conte
     const target = staged.stagedTargets?.[0];
     if (!target) throw new Error(`${store.key}: staged upload returned no target`);
 
-    // The parameters are the bucket's signed fields and have to be sent exactly as given, followed
-    // by the file. FormData sets its own multipart boundary, so no Content-Type header here.
+  // The signed bucket fields go exactly as given, then the file; FormData sets its own boundary.
     const form = new FormData();
     for (const { name, value } of target.parameters) form.append(name, value);
     form.append('file', new Blob([bytes], { type: contentType }), filename);
@@ -279,8 +253,7 @@ export async function addProductImage(store, productId, { filename, bytes, conte
     return waitForMedia(store, productId, created.id);
 }
 
-// `productDeleteMedia` is gone in API version 2026-07 too: `fileDelete` removes the media file and
-// leaves the product with no media, which is what replacing an image needs before the new one lands.
+// `productDeleteMedia` is gone too: `fileDelete` removes the media, leaving the product ready for a new one.
 export async function deleteMediaFiles(store, fileIds) {
   const result = (
     await adminGraphql(

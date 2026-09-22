@@ -1,6 +1,4 @@
-// "22.0" and "22.00" are one price, not a mismatch: pg hands numeric(10,2) back as a string and
-// Shopify's Money is a string too, so the two are compared as numbers. A missing value never
-// matches, so a store that has not reported cannot look settled.
+// "22.0" and "22.00" are one price: pg and Shopify both send strings, so compare as numbers — a missing value never matches.
 const differs = (live, central) =>
   live === null ||
   live === undefined ||
@@ -8,10 +6,7 @@ const differs = (live, central) =>
   central === undefined ||
   Number(live) !== Number(central);
 
-// Replaces each store's recorded price with the one the store holds right now: `live` carries one
-// entry per store, either a sku -> price Map or the error that stopped the read. The recorded row
-// is kept for `last_synced_at`, but `status` and `live_price` always describe this read, so a price
-// edited straight into a Shopify admin is flagged instead of hiding behind a stale `synced`.
+// `live` is one Map-or-error per store: the recorded price is replaced by what was just read, so a stale `synced` cannot hide drift.
 export function mergeLivePrices(rows, live) {
   return rows.map((row) => ({
     ...row,
@@ -47,8 +42,7 @@ export function mergeLivePrices(rows, live) {
 export function flagMismatches(rows) {
   return rows.map((row) => ({
     ...row,
-    // A SKU no store has reported on is flagged as well: nothing has confirmed that either store
-    // holds the central price.
+    // A SKU no store has reported on is flagged too: silence is not agreement.
     has_mismatch:
       Object.values(row.stores).length === 0 ||
       Object.values(row.stores).some(

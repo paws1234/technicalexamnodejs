@@ -1,6 +1,4 @@
-// The runnable check for the logic that decides the dashboard's badges: flagMismatches (what counts
-// as a mismatch) and mergeLivePrices (which replaces a recorded store price with the one just read).
-// Offline, no framework, no database: `node backend/check-mismatch.js` from the repo root or backend/.
+// The runnable check for the badge logic (flagMismatches, mergeLivePrices); offline, no framework, no database.
 import assert from 'node:assert/strict';
 import { flagMismatches, mergeLivePrices } from './src/prices.js';
 
@@ -28,8 +26,7 @@ check(flagged(sku('19.99', {})), true);
 // "22.0" and "22.00" are the same price, so formatting is never read as drift
 check(flagged(sku('22.00', { alpha: synced('22.0'), beta: synced('22.00') })), false);
 
-// What was read replaces what was recorded, in both directions. A store edited straight in a Shopify
-// admin disagrees even though its recorded row still says `synced` …
+// The read replaces the record in both directions: an admin edit disagrees even though the row says synced.
 check(merged(sku('19.99', { alpha: synced('19.99') }), [read({ 'SKU-001': '21.00' })]).stores.alpha.status, 'mismatch');
 check(flagged(merged(sku('19.99', { alpha: synced('19.99') }), [read({ 'SKU-001': '21.00' })])), true);
 // … and a store that now holds the central price is not flagged just because its row says otherwise.

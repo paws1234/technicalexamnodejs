@@ -10,15 +10,11 @@ type StoreResult = { store: string; status: string; error?: string | null };
 // The names the table's own headers use, so a button names the store the operator is looking at.
 const LABEL: Record<string, string> = { alpha: 'Store A', beta: 'Store B' };
 const name = (key: string) => LABEL[key] ?? key;
-// "22.0" and "22.00" are one price — the same rule the flags use, so no button is offered for a
-// store that already agrees with the central price.
+// "22.0" and "22.00" are one price — the same rule the flags use — so no button is offered for a store already in step.
 const same = (a: string, b: string) => Number(a) === Number(b);
 const BUTTON = 'rounded px-2 py-1 text-xs font-medium disabled:opacity-50';
 
-// A drifted row is a decision, not an error: either push the central price out again, or accept
-// what a store holds as the new central price. Both are the same PATCH with a different value, so
-// a resolution travels the path a manual edit already takes — and either way both stores end level,
-// because the chosen price is written to both.
+// A drifted row is a decision: push central out again, or adopt a store's value. Both are one PATCH, so both stores end level.
 export default function DriftResolver({
   sku,
   central,
@@ -51,8 +47,7 @@ export default function DriftResolver({
       }
       const results: StoreResult[] = result.stores ?? [];
       const failed = results.filter((store) => store.status !== 'synced');
-      // Only a failure is reported: a clean resolution removes this box with the refreshed row, so
-      // an "ok" message would never be read.
+        // Only a failure is reported: a clean resolution removes this box with the refreshed row.
       if (failed.length > 0) {
         setNote(failed.map((store) => `${name(store.store)}: ${store.error ?? store.status}`).join(' · '));
       }

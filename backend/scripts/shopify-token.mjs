@@ -1,13 +1,5 @@
 #!/usr/bin/env node
-// Mints a short-lived Admin API access token for one store via the client credentials grant, for
-// the manual Phase 0 checks — there is no longer a token to paste out of the Shopify admin
-// (admin-created custom apps can no longer be created; a Dev Dashboard app mints one on demand).
-// See https://shopify.dev/docs/apps/build/authentication-authorization/client-credentials-grant
-//
-//   node backend/scripts/shopify-token.mjs alpha          # confirmation, token masked
-//   node backend/scripts/shopify-token.mjs beta --print    # raw token, for $(...)
-//
-// src/shopify.js mints and caches the same token in-process at runtime.
+// Mints a token for one store via the client credentials grant: node backend/scripts/shopify-token.mjs <alpha|beta> [--print].
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,11 +87,7 @@ if (printOnly) {
   );
 }
 
-// An empty `scope` is not cosmetic: the grant reads the scopes back from the app version that was
-// released, so an empty list means this token can do nothing at all. Measured 2026-09-20: such a
-// token came back `Access denied for products field` (ACCESS_DENIED) — the mint had looked
-// successful. Exiting non-zero keeps the "exit 0" check meaningful: a *usable* credential, not
-// merely a mint.
+// An empty `scope` means the token can do nothing (measured 2026-09-20), so exit 3 keeps "exit 0" meaningful.
 if (!parsed.scope) {
     console.error(
         [
