@@ -25,13 +25,13 @@ dashboard calls the API on its own origin.
 ## How it fits together
 
 ```
-Shopify Store A ─┐                            ┌─ GET   /prices        catalogue + per-store state + has_mismatch
+Shopify Store A ─┐                            ┌─ GET   /prices        catalogue + live state + has_mismatch
                  ├── Express API (Vercel) ────┤  PATCH /prices/:sku  central price, then both stores
 Shopify Store B ─┘                            ├─ PATCH /products/:sku SKU + item name, then both stores
          ▲                  │                 └─ PUT   /images/:sku   replace the image, then both stores
          │                  ▼
-         │          Supabase Postgres ──────────── Next.js dashboard: the 10 SKUs, each store's last
-         └──────── (source of truth) ◀────────────  known price/status, and a per-row price editor
+         │          Supabase Postgres ──────────── Next.js dashboard: the 10 SKUs, each store's
+         └──────── (source of truth) ◀────────────  live price/status, and a per-row price editor
 ```
 
 A `PATCH` runs in three steps: **A** write the central price, **B** look the variant up by SKU on
@@ -253,10 +253,14 @@ names are the standard libpq contract, so `psql`, `pg_dump` and node-postgres re
   updated on a rename, but the alt text on the existing image is not re-written — that would mean
   re-uploading the file or a `fileUpdate` per store. The image sync does not depend on the alt any
   more, so the consequence is cosmetic (the store's alt can name the old title).
-- **Store state is written, never read live.** `GET /prices` compares the central price against the
-  *last known* store price in `store_sync_status`, which is written by `PATCH` and by
-  `node backend/scripts/refresh-status.js`. A price changed directly in a Shopify admin is therefore
-  only visible after the refresh script runs.
+- **`GET /prices` reads both stores live.** Every request compares the central price against what
+  each store holds right now — one Admin API query per store returning every variant as
+  `sku → price`, not one query per SKU — so a price changed directly in a Shopify admin is flagged on
+  the next page load. The cost is two Shopify calls per dashboard load (~0.6 s warm locally).
+  `store_sync_status.live_price` is still written by `PATCH` and by
+  `node backend/scripts/refresh-status.js`, but it is now the recorded log rather than what the
+  dashboard compares against. A store that cannot be read is reported `failed` on every row with its
+  error attached, and the endpoint still answers `200`.
 - **`failed` and `mismatch` are distinct.** `failed` = the store could not be read or written at all;
   `mismatch` = the store was read and its price differs from the central one.
 - **One currency, no rounding logic.** Every price is a 2-decimal `numeric(10,2)`.

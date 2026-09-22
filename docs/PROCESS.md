@@ -22,7 +22,7 @@ Build a small Node.js/Express service that acts as the **single source of truth*
 | One central price source for 10 shared SKUs | Supabase Postgres, `products` table, 10 rows, seeded from a checked-in file |
 | An API endpoint to update a price | `PATCH /prices/:sku` |
 | Push the change to both stores automatically | The same PATCH writes the central price, then the matching variant on both stores, then records the outcome per store |
-| **Bonus:** `GET /prices` with per-store live prices and mismatch flags | `GET /prices` returns each SKU with its central price, both stores' last known price and status, and a `has_mismatch` flag per row |
+| **Bonus:** `GET /prices` with per-store live prices and mismatch flags | `GET /prices` returns each SKU with its central price, both stores' price and status read from Shopify on that request, and a `has_mismatch` flag per row |
 | **Bonus:** a UI to view, update and watch sync status | Next.js dashboard: 10 rows, a price editor per row, a colour-coded badge per store |
 
 The chain, end to end:
@@ -69,6 +69,11 @@ Snapshot of what the system currently holds (re-read it, do not assume it):
 
 `store_sync_status` holds **20 rows, every one `synced`** (10 SKUs × 2 stores), and a live check of
 the deployed `/prices` returns **10 rows, 0 flagged**.
+
+*(Re-read 2026-09-22: the prices in the table above have moved on — `SKU-001` is `20.00` and
+`SKU-009` is `12.00` centrally — and Store A holds `99.51` for `SKU-010` against a central `89.51`,
+so the endpoint flags exactly one row. That drift was invisible while the comparison used the last
+recorded value, which is why the read was made live.)*
 
 ---
 
@@ -145,10 +150,11 @@ Two tables carry the whole task:
 
 A third table, `product_images`, was added later for the image work.
 
-**Prices are compared as text-exact strings, not floating point numbers.** A PostgreSQL `numeric`
-column comes back as a string, and Shopify also returns money as a string. Comparing them as
-numbers ("22.0" equal to "22.00") is done explicitly, once, in the two places that need it — so a
-formatting difference never masquerades as a price drift.
+**Prices are compared as numbers, never as text.** A PostgreSQL `numeric` column comes back as a
+string, and Shopify also returns money as a string, so `"22.0"` and `"22.00"` would read as drift if
+they were compared literally. Both places that compare them — `prices.js`, which decides the
+dashboard's flags, and `refresh-status.js`, which writes the recorded log — convert explicitly, so a
+formatting difference never masquerades as a price change.
 
 ### 4.3 The database connection
 
@@ -207,14 +213,20 @@ Someone types a new price for `SKU-004` in the dashboard and submits.
 
 ### 5.2 What happens when the dashboard is viewed
 
-`GET /prices` returns the catalogue plus each store's **last known** state, with each row flagged
-when something disagrees. A row is flagged when any store is not `synced`, when any store's last
-known price differs from the central price, or when no store has reported on that SKU at all — the
-last case matters because silence is not agreement.
+`GET /prices` reads both stores and returns the catalogue plus each store's **live** state, with each
+row flagged when something disagrees. A row is flagged when any store is not `synced`, when any
+store's live price differs from the central price, or when no store has reported on that SKU at all —
+the last case matters because silence is not agreement.
 
-Because this compares against *recorded* store state rather than reading Shopify on every page load,
-a price changed directly in a Shopify admin becomes visible only after the refresh script runs. The
-script reads each store live and rewrites the baseline; it sends no price anywhere, so running it is
+The read is one Admin API query per store — every variant as `sku → price` — rather than one per SKU,
+so a dashboard load costs two Shopify calls; measured warm at roughly `0.6 s` locally. A store that
+cannot be read is reported as `failed` on every row with the error attached, and the request is still
+a `200`, because the catalogue itself is available. A price changed directly in a Shopify admin is
+therefore flagged on the next page load.
+
+`node backend/scripts/refresh-status.js` still exists, and still reads each store live, but its job
+has narrowed: it keeps the *recorded* log (`store_sync_status` and its `last_synced_at`) level with
+the stores instead of making the dashboard correct. It sends no price anywhere, so running it is
 always safe.
 
 ---
@@ -439,6 +451,9 @@ clearest demonstration that the flag is real.
 - **The Shopify token is minted, cached for 24 hours, and never stored.**
 - **Prices are compared as strings, then as numbers** — deliberately, so formatting is never read as
   drift.
+- **`GET /prices` reads the stores; it does not trust the log.** One Admin API query per store, so a
+  price changed in a Shopify admin is flagged on the next page load, and a store that cannot be read
+  shows as `failed` instead of as its last known state.
 - **The database is reached over the IPv4 connection pooler** with the standard `PG*` names; the
   direct host is IPv6-only and unusable from a container.
 - **The relaxed TLS mode lives on the connection pool, not in the environment**, because the

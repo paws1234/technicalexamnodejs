@@ -3,7 +3,7 @@ import express from 'express';
 import { createHash } from 'node:crypto';
 import { config } from './config.js';
 import { imageFilename, sniffImageType } from './images.js';
-import { flagMismatches } from './prices.js';
+import { flagMismatches, mergeLivePrices } from './prices.js';
 import {
   getImage,
   getProduct,
@@ -19,6 +19,7 @@ import {
   deleteMediaFiles,
   findVariantBySku,
   productMedia,
+  readStorePrices,
   updateProductTitle,
   updateVariantPrice,
   updateVariantSku,
@@ -47,9 +48,24 @@ app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
+// Two Admin API reads per request, not twenty: the rows carry what the stores hold *now*, so a price
+// changed straight in a Shopify admin is flagged on the next page load instead of hiding behind the
+// last recorded value. A store that cannot be read is reported as `failed` on every row — the
+// catalogue itself is still available, so that stays a 200.
+//
 // A rejected query reaches the error handler below by itself (Express 5).
 app.get('/prices', async (req, res) => {
-  res.json(flagMismatches(await listPrices()));
+  const rows = await listPrices();
+  const live = await Promise.all(
+    stores.map(async (store) => {
+      try {
+        return { key: store.key, prices: await readStorePrices(store) };
+      } catch (error) {
+        return { key: store.key, error: reason(error) };
+      }
+    }),
+  );
+  res.json(flagMismatches(mergeLivePrices(rows, live)));
 });
 
 // One store's half of the sync. Its failure is recorded and returned here, never thrown, so the

@@ -91,6 +91,14 @@ export async function findVariantBySku(sku, store) {
   return { variantId: node.id, productId: node.product.id, price: node.price };
 }
 
+// Every variant on the store in one call, as sku -> price. A dashboard load needs all ten SKUs from
+// both stores, which is why this is not ten findVariantBySku calls.
+// ponytail: the first 250 variants only — this catalogue is 10, a bigger store would need paging.
+export async function readStorePrices(store) {
+  const data = await adminGraphql(store, `{ productVariants(first: 250) { nodes { sku price } } }`);
+  return new Map((data?.productVariants?.nodes ?? []).map(({ sku, price }) => [sku, price]));
+}
+
 // Takes the object findVariantBySku returned, so the caller never has to know that the product id
 // is part of addressing the variant.
 export async function updateVariantPrice(store, { variantId, productId }, price) {
