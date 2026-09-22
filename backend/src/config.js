@@ -1,21 +1,16 @@
-// The backend's environment contract. Every module reads its settings from here, so a
-// missing variable is a startup error rather than a half-configured request later.
+// The backend's environment contract: a missing variable is a startup error rather than a
+// half-configured request later.
 //
-// Two names in .env.example are deliberately absent from NAMES: SUPABASE_URL and
-// SUPABASE_SERVICE_ROLE_KEY. The app reaches Supabase with node-postgres over the pooler
-// (the PG* names below), so an empty SUPABASE_SERVICE_ROLE_KEY must not stop startup.
-//
-// NAMES maps the key each module uses (`config.allowedOrigin`) to the environment
-// variable it comes from, so the startup check and the exported object share one list
-// and a name cannot be validated in one and forgotten in the other.
+// SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are deliberately absent: the app reaches Supabase
+// with node-postgres over the pooler (the PG* names below), so a blank service-role key must not
+// stop startup.
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
-// Resolved from this file rather than the cwd, so backend/.env is found whether the
-// process was started from the repo root or from backend/. `quiet` keeps dotenv's
-// "injecting env" banner off stdout — this module is imported by the server and by
-// one-liner checks whose stdout is the result.
+// Resolved from this file rather than the cwd, so backend/.env is found whether the process was
+// started from the repo root or from backend/. `quiet` keeps dotenv's "injecting env" banner off
+// stdout — one-liner checks read stdout as the result.
 dotenv.config({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env'), quiet: true });
 
 const NAMES = {
@@ -34,15 +29,13 @@ const NAMES = {
   shopifyApiVersion: 'SHOPIFY_API_VERSION',
 };
 
-// PORT is deliberately the one optional name: the Env vars table marks it local-only,
-// and the deployed entry (`src/app.js`, which Vercel wraps itself) never calls listen,
-// so a deployment without it is complete. Requiring it made every deployed route 500
-// with "Missing required environment variable(s): PORT". The fallback is the value a
-// local run uses when .env omits it; every other name below stays a startup error.
+// PORT is the one optional name: the Env vars table marks it local-only and the deployed entry
+// never calls listen, so requiring it 500s every deployed route with "Missing required environment
+// variable(s): PORT". The fallback is the value a local run uses when .env omits it.
 const OPTIONAL = new Map([['PORT', '3000']]);
 
-// Report every missing name at once, so one run fixes the whole .env rather than one
-// variable per attempt. Names only — never values.
+// Every missing name at once, so one run fixes the whole .env rather than one variable per
+// attempt. Names only — never values.
 const missing = Object.values(NAMES).filter((name) => !process.env[name] && !OPTIONAL.has(name));
 if (missing.length > 0) {
   throw new Error(`Missing required environment variable(s): ${missing.join(', ')}`);

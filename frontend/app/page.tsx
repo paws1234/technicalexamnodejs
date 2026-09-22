@@ -2,22 +2,16 @@ import { getPrices } from '@/lib/api';
 import StatusBadge from '@/components/StatusBadge';
 import PriceEditor from '@/components/PriceEditor';
 
-// §3.3.2 — the core view: one row per SKU with the SKU, item name, central price and one status
-// column per store. Fetched on the server (T-2.3), so the first paint already holds the
-// catalogue rather than flashing an empty table.
-//
-// One grid serves both widths. `md:contents` dissolves each label/value wrapper at the
-// breakpoint, so a phone sees labelled lines and a desktop sees six aligned columns — the
-// alternative, a fixed table, would scroll sideways at 375px (T-2.8). The last column is
-// reserved for T-2.5's price editor, so nothing here has to move when it lands.
+// One grid serves both widths: `md:contents` dissolves each label/value wrapper at the breakpoint,
+// so a phone sees labelled lines and a desktop sees six aligned columns — a fixed table would
+// scroll sideways at 375px. The last column is the price editor.
 const COLS = 'md:grid-cols-[4.5rem_minmax(0,1fr)_5rem_7rem_7rem_11rem] md:items-center md:gap-4';
 const ROW = `grid gap-1.5 py-3 md:py-2 ${COLS}`;
 const CELL = 'grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2 md:contents';
 const LABEL = 'text-xs uppercase tracking-wide text-gray-500 md:hidden';
 
-// The shape `GET /prices` returns (T-1.10). A store entry can be absent — the endpoint reports
-// `stores: {}` for a SKU no store has reported on — so the cells read it optionally rather than
-// crashing on the one row that has no status yet.
+// A store entry can be absent — the endpoint reports `stores: {}` for a SKU no store has reported
+// on — so the cells read it optionally rather than crashing on the one row that has no status yet.
 type PriceRow = {
   sku: string;
   name: string;
@@ -28,11 +22,10 @@ type PriceRow = {
   };
 };
 
-// §3.4.3 — the table must show what the stores hold *now*, so the route is rendered per request
-// rather than prerendered at build time. Verified necessary: without this `next build` reports
-// `○ /` (Static), meaning a deployed dashboard would serve build-time prices for ever and
-// `router.refresh()` (T-2.6) would re-fetch that same frozen payload — and the build itself
-// would need a reachable backend, so the frontend could not be built before the backend exists.
+// Rendered per request rather than prerendered at build time, so the table shows what the stores
+// hold now: otherwise a deployed dashboard would serve build-time prices for ever and
+// `router.refresh()` would re-fetch that same frozen payload. The check is `next build`'s route
+// table, which must read `ƒ /` rather than `○ /`.
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {

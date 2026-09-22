@@ -1,6 +1,5 @@
-// The one runnable check rules.md asks for, for the logic that cannot be verified by reading it:
-// flagMismatches decides what the dashboard's status badges mean. Offline, no framework, no
-// database — run it with `node backend/check-mismatch.js` from the repo root or from backend/.
+// The runnable check for flagMismatches, the logic that decides the dashboard's badges. Offline, no
+// framework, no database: `node backend/check-mismatch.js` from the repo root or from backend/.
 import assert from 'node:assert/strict';
 import { flagMismatches } from './src/prices.js';
 

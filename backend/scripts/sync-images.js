@@ -4,10 +4,9 @@
 //   node backend/scripts/sync-images.js               # fetch what is missing, then sync both stores
 //   node backend/scripts/sync-images.js --self-check  # offline: the search-term and matching logic
 //
-// Two properties make this re-runnable rather than once-only: an image is fetched once and then
-// read from `product_images`, and a store already carrying the image (matched on the alt text,
-// which is the product name) is left alone. So a second run is a verification pass — which is how
-// "it synced" is checked, on a fresh read from each store rather than on this run's own output.
+// Re-runnable by design: an image is fetched once and then read from `product_images`, and a store
+// already carrying it (matched on the alt text, which is the product name) is left alone — so a
+// second run is the verification pass, on a fresh read from each store rather than this run's output.
 import assert from 'node:assert/strict';
 import { pool } from '../src/db.js';
 import { ensureImage, mentions, pickBest, searchTerms } from '../src/images.js';
@@ -15,11 +14,10 @@ import { listPrices } from '../src/queries.js';
 import { addProductImage, findVariantBySku, productMedia, waitForMedia } from '../src/shopify.js';
 import { stores } from '../src/stores.js';
 
-// The image search the derived terms get wrong, because the keyless index holds no photograph of
-// the object under those words: "Coasters" is roller coasters, "Field Notebook" is people writing
-// in one, "Pour-Over" is iced coffee. This is the phrase a person would type instead. Every other
-// product uses the derived terms, and the photo chosen under a phrase still has to mention it, so a
-// phrase cannot smuggle in a wrong picture.
+// The phrases the derived terms get wrong, because the keyless index holds no photograph of the
+// object under those words: "Coasters" is roller coasters, "Field Notebook" is people writing in
+// one. Every other product uses the derived terms, and a photo chosen under a phrase still has to
+// mention it, so a phrase cannot smuggle in a wrong picture.
 const SEARCH_PHRASES = {
   'SKU-002': 'paper notebook', // "notebook" alone is a laptop
   'SKU-005': 'coffee dripper',
@@ -40,8 +38,8 @@ function selfCheck() {
   // "Sunset", which is what whole-word matching is for.
   assert.equal(mentions({ title: 'Sunset over the Chukchi Sea', tags: [] }, 'pour-over set'), false);
   assert.equal(mentions({ title: 'Iced pour-over coffee', tags: [] }, 'pour-over'), true);
-  // The lens photo titled "... Travel Mug": the title alone would pass, the photographer's tags
-  // are what reject it. Tag-only matching is asked first for exactly this reason.
+  // The lens photo titled "... Travel Mug": the title alone would pass, the photographer's tags are
+  // what reject it. Tag-only matching is asked first for exactly this reason.
   const lens = { title: 'Canon Zoom Lens EF 70-200mm f/4 L USM Travel Mug', tags: [{ name: 'canon' }, { name: 'lens' }] };
   assert.equal(mentions(lens, 'travel mug'), true, 'the title does mention it');
   assert.equal(mentions(lens, 'travel mug', { tagsOnly: true }), false, 'the tags do not');
@@ -73,10 +71,9 @@ let failures = 0;
 for (const { sku, name } of rows) {
   try {
     const image = await ensureImage(sku, name, SEARCH_PHRASES[sku] ?? null);
-    // The extension follows the type the provider actually served: a WebP named `.jpg` is a lie
-    // in the store's image URL, and the provider does mix formats (SKU-006 is WebP).
+    // The extension follows the type the provider actually served: the file name survives into the
+    // store's image URL, and the provider does mix formats (SKU-006 is WebP).
     const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[image.content_type] ?? 'jpg';
-    // A filename that reads well: the file name survives into the store's image URL.
     const filename = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}.${extension}`;
     console.log(
       `${sku} ${JSON.stringify(name)} <- "${image.search_term}" ${(image.bytes.length / 1024).toFixed(0)}KB ` +
@@ -86,8 +83,8 @@ for (const { sku, name } of rows) {
     for (const store of stores) {
       const { productId } = await findVariantBySku(sku, store);
       // Matched on the alt text, which is the product name. An image that is attached but still
-      // processing is waited for rather than replaced — adding a second one would be a duplicate,
-      // and the store is what decides when it is READY.
+      // processing is waited for rather than replaced — a second one would be a duplicate, and the
+      // store decides when it is READY.
       const held = (await productMedia(store, productId)).find((node) => node.alt === name);
       if (held?.status === 'READY') {
         outcomes.push(`${sku} ${store.key}: already READY`);

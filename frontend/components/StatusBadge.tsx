@@ -1,13 +1,12 @@
-// §3.3.3 — one colour-coded indicator per store cell. `status` drives the colour, so a value the
-// sync layer invents later shows up grey rather than silently wearing the "fine" colour.
+// `status` drives the colour, so a value the sync layer invents later shows up grey rather than
+// silently wearing the "fine" colour. `justify-self-start` keeps the badge snug whether it is a
+// grid item in the desktop row or in the phone's label/value cell.
 const STYLES: Record<string, string> = {
   synced: 'bg-green-100 text-green-800',
   mismatch: 'bg-yellow-100 text-yellow-800',
   failed: 'bg-red-100 text-red-800',
 };
 
-// `justify-self-start` keeps the badge snug whether it is a grid item in the desktop row or in
-// the phone's label/value cell; without it a grid item stretches to the full column.
 export default function StatusBadge({ status, error }: { status: string; error?: string | null }) {
   return (
     <span

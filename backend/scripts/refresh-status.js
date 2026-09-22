@@ -1,9 +1,7 @@
 #!/usr/bin/env node
-// Fills store_sync_status from what the stores actually hold (T-1.17). GET /prices can only flag
-// drift against *stored* live prices, and nothing else populates them before the first PATCH
-// (task.md assumption 3), so this is the baseline the dashboard compares against.
-//
-// It reads Shopify and writes only the sync log — no price is ever sent to a store here.
+// Fills store_sync_status from what the stores actually hold — the baseline `GET /prices` flags drift
+// against before any PATCH has run (task.md assumption 3). Reads Shopify, writes only the sync log:
+// no price is ever sent to a store here.
 //
 //   node backend/scripts/refresh-status.js
 import { pool } from '../src/db.js';

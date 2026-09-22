@@ -1,13 +1,12 @@
 // The Shopify Admin API calls the sync makes, and the token they share.
 //
-// The token is minted here and never read from the environment: since admin-created custom
-// apps can no longer be created, the client credentials grant is the only way to get one
-// (assumption 1). It lasts 24h, so it is cached per store rather than re-minted per request.
-// `backend/scripts/shopify-token.mjs` is the Phase 0 / manual equivalent of this mint.
+// The token is minted here, never read from the environment: admin-created custom apps can no
+// longer be created, so the client credentials grant is the only way to get one (assumption 1).
+// It lasts 24h, so it is cached per store rather than re-minted per request.
 import { config } from './config.js';
 
-// store.key -> { token, expiresAt }. The 5-minute margin keeps a token from expiring between
-// being minted and the call that uses it.
+// store.key -> { token, expiresAt }. The 5-minute margin keeps a token from expiring between being
+// minted and the call that uses it.
 const tokenCache = new Map();
 
 async function mintToken(store) {
@@ -80,9 +79,8 @@ export async function findVariantBySku(sku, store) {
   // `product { id }` comes along because the only variant price-write left in this API version
   // (`productVariantUpdate` is gone from the Mutation type as of 2026-07) is
   // `productVariantsBulkUpdate`, which addresses the variant's product rather than the variant.
-  // Reading it here saves the write a second round trip.
-  // JSON.stringify produces exactly the escaping a GraphQL string literal accepts, so an odd
-  // SKU cannot break out of the query.
+  // JSON.stringify produces exactly the escaping a GraphQL string literal accepts, so an odd SKU
+  // cannot break out of the query.
   const data = await adminGraphql(
     store,
     `{ productVariants(first: 1, query: ${JSON.stringify(`sku:${sku}`)}) { edges { node { id price product { id } } } } }`,
@@ -93,8 +91,8 @@ export async function findVariantBySku(sku, store) {
   return { variantId: node.id, productId: node.product.id, price: node.price };
 }
 
-// Writes one variant's price. Takes the object findVariantBySku returned, so the caller never
-// has to know that the product id is part of addressing the variant.
+// Takes the object findVariantBySku returned, so the caller never has to know that the product id
+// is part of addressing the variant.
 export async function updateVariantPrice(store, { variantId, productId }, price) {
   const data = await adminGraphql(
     store,
@@ -121,8 +119,8 @@ export async function updateVariantPrice(store, { variantId, productId }, price)
   return variant.price;
 }
 
-// Every image (and any other media) a product carries. The inline fragment is what reaches the
-// `image` field: `media` returns the `Media` interface, which has no `image` of its own.
+// The inline fragment is what reaches the `image` field: `media` returns the `Media` interface,
+// which has no `image` of its own.
 export async function productMedia(store, productId) {
     const data = await adminGraphql(
         store,
@@ -143,9 +141,9 @@ const MEDIA_POLL_MS = 1000;
 const MEDIA_ATTEMPTS = 20;
 
 // Processing is asynchronous: a mutation returns as soon as the file is accepted, and `status`
-// moves UPLOADED/PROCESSING -> READY (or FAILED). Reporting success before READY would claim an
-// image the store has not actually published. Exported because a media that is already attached
-// has to be waited for as well — otherwise a second run adds a duplicate next to it.
+// moves UPLOADED/PROCESSING -> READY (or FAILED), so reporting success before READY would claim an
+// image the store has not published. Exported because an already-attached media has to be waited
+// for as well — a second run would otherwise add a duplicate next to it.
 export async function waitForMedia(store, productId, mediaId) {
     for (let attempt = 0; attempt < MEDIA_ATTEMPTS; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, MEDIA_POLL_MS));
@@ -161,10 +159,8 @@ export async function waitForMedia(store, productId, mediaId) {
 // Attaching an image is three calls, because the bytes are ours and not a public URL: create a
 // staged upload target, POST the file to it, then point the product at the staged resource.
 // `productCreateMedia` no longer exists in API version 2026-07 — the `media` argument of
-// `productUpdate` replaced it. Two argument details came from the API itself, not the schema dump:
-// the product has to be named in `product` (an `identifier`-only call is rejected with "must
-// include exactly one of the following arguments: input, product"), and `product` is optional in
-// the schema but not for a media-only update. See task.md T-5.3.
+// `productUpdate` replaced it, and `product` has to be named there (an `identifier`-only call is
+// rejected with "must include exactly one of the following arguments: input, product").
 export async function addProductImage(store, productId, { filename, bytes, contentType, alt }) {
     const staged = (
         await adminGraphql(

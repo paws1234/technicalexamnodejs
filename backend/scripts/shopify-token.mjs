@@ -1,17 +1,13 @@
 #!/usr/bin/env node
-// Mints a short-lived Admin API access token for one store via the client
-// credentials grant.
-//
-// This exists because there is no longer a token to paste out of the Shopify admin:
-// admin-created custom apps can no longer be created ("For new apps, use Dev Dashboard
-// or Shopify CLI"), and a Dev Dashboard app mints one on demand instead. See
-// https://shopify.dev/docs/apps/build/authentication-authorization/client-credentials-grant
+// Mints a short-lived Admin API access token for one store via the client credentials grant, for
+// the manual Phase 0 checks — there is no longer a token to paste out of the Shopify admin
+// (admin-created custom apps can no longer be created; a Dev Dashboard app mints one on demand).
+// See https://shopify.dev/docs/apps/build/authentication-authorization/client-credentials-grant
 //
 //   node backend/scripts/shopify-token.mjs alpha          # confirmation, token masked
 //   node backend/scripts/shopify-token.mjs beta --print    # raw token, for $(...)
 //
-// The token lasts 24h (expires_in 86399). T-1.5 mints and caches it the same way; this
-// script is the Phase 0 / manual equivalent, used by T-0.6, T-0.7, T-0.9 and T-0.14.
+// src/shopify.js mints and caches the same token in-process at runtime.
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,8 +34,7 @@ const store = STORES[storeName];
 const clientId = process.env.SHOPIFY_CLIENT_ID;
 const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
 
-// Report every missing name at once, so one run fixes the whole .env rather than one
-// variable per attempt. Names only — never values.
+// Every missing name at once, so one run fixes the whole .env. Names only — never values.
 const missing = [
   !store && `SHOPIFY_${storeName.toUpperCase()}_STORE`,
   !clientId && 'SHOPIFY_CLIENT_ID',
@@ -100,12 +95,11 @@ if (printOnly) {
   );
 }
 
-// An empty `scope` is not cosmetic. The client credentials grant reads the scopes back
-// from the app version that was released, so an empty list means this token can do
-// nothing at all. Measured 2026-09-20: a token minted with `scope=` came back
-// `Access denied for products field` (ACCESS_DENIED) — the mint had looked successful.
-// Exiting non-zero keeps T-0.6's "exit 0" meaningful: it is meant to prove a *usable*
-// credential, not merely a mint.
+// An empty `scope` is not cosmetic: the grant reads the scopes back from the app version that was
+// released, so an empty list means this token can do nothing at all. Measured 2026-09-20: such a
+// token came back `Access denied for products field` (ACCESS_DENIED) — the mint had looked
+// successful. Exiting non-zero keeps the "exit 0" check meaningful: a *usable* credential, not
+// merely a mint.
 if (!parsed.scope) {
     console.error(
         [
